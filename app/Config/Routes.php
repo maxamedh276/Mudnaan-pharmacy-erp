@@ -24,6 +24,11 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers'], static function (Ro
         $routes->post('auth/refresh', 'Auth\LoginController::refresh');
         $routes->post('auth/logout', 'Auth\LoginController::logout');
 
+        // POS / Sales
+        $routes->get('sales', 'Pos\SalesController::index');
+        $routes->post('sales', 'Pos\SalesController::create');
+        $routes->get('sales/(:num)', 'Pos\SalesController::show/$1');
+
         // Catalog
         $routes->get('products', 'Pos\ProductsController::index');
         $routes->post('products', 'Pos\ProductsController::create');
