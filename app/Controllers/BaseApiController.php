@@ -2,6 +2,7 @@
 
 namespace App\Controllers;
 
+use App\Libraries\AuthContext;
 use CodeIgniter\Controller;
 use CodeIgniter\HTTP\CLIRequest;
 use CodeIgniter\HTTP\IncomingRequest;
@@ -76,6 +77,39 @@ abstract class BaseApiController extends Controller
     protected function respondNotFound(string $what = 'Resource'): ResponseInterface
     {
         return $this->respondError('NOT_FOUND', $what . ' not found.', 404);
+    }
+
+    /**
+     * Returns a 403 response when the current user lacks a permission,
+     * or null when they have it. Usage:
+     *   if ($denied = $this->requirePermission('products.edit')) return $denied;
+     */
+    protected function requirePermission(string $permissionCode): ?ResponseInterface
+    {
+        if (! AuthContext::can($permissionCode)) {
+            return $this->respondError(
+                'FORBIDDEN',
+                'You do not have permission to perform this action.',
+                403,
+            );
+        }
+
+        return null;
+    }
+
+    /**
+     * The branch this request operates on: an explicit ?branch_id for
+     * Premium tenants (multi-branch), otherwise the user's own branch.
+     */
+    protected function branchId(): int
+    {
+        $requested = (int) $this->request->getGet('branch_id');
+
+        if ($requested > 0 && AuthContext::isPremium()) {
+            return $requested;
+        }
+
+        return (int) (AuthContext::$user->branch_id ?? 1);
     }
 
     /**
