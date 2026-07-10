@@ -43,9 +43,34 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers'], static function (Ro
         $routes->get('stock/movements', 'Inventory\StockController::movements');
         $routes->post('stock/adjustments', 'Inventory\StockController::adjust');
 
+        // Purchases
+        $routes->get('purchases', 'Inventory\PurchasesController::index');
+        $routes->post('purchases', 'Inventory\PurchasesController::create');
+        $routes->get('purchases/(:num)', 'Inventory\PurchasesController::show/$1');
+
+        // People
+        $routes->get('customers', 'People\CustomersController::index');
+        $routes->post('customers', 'People\CustomersController::create');
+        $routes->get('customers/(:num)', 'People\CustomersController::show/$1');
+        $routes->put('customers/(:num)', 'People\CustomersController::update/$1');
+        $routes->delete('customers/(:num)', 'People\CustomersController::delete/$1');
+        $routes->get('suppliers', 'People\SuppliersController::index');
+        $routes->post('suppliers', 'People\SuppliersController::create');
+        $routes->get('suppliers/(:num)', 'People\SuppliersController::show/$1');
+        $routes->put('suppliers/(:num)', 'People\SuppliersController::update/$1');
+        $routes->delete('suppliers/(:num)', 'People\SuppliersController::delete/$1');
+
+        // Basic dashboard (all plans)
+        $routes->get('reports/dashboard', 'Reports\ReportsController::dashboard');
+
         // ---- PREMIUM ONLY -------------------------------------------
         $routes->group('', ['filter' => 'plan:premium'], static function (RouteCollection $routes) {
-            // accounting + advanced reports routes land here as modules are built
+            $routes->get('reports/sales', 'Reports\ReportsController::sales');
+            $routes->get('reports/inventory', 'Reports\ReportsController::inventory');
+            $routes->get('accounts', 'Accounting\AccountsController::index');
+            $routes->get('journal-entries', 'Accounting\JournalController::index');
+            $routes->post('journal-entries', 'Accounting\JournalController::create');
+            $routes->get('journal-entries/(:num)', 'Accounting\JournalController::show/$1');
         });
     });
 });
