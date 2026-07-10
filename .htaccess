@@ -2,6 +2,21 @@
 Options -Indexes
 
 # ----------------------------------------------------------------------
+# Protect sensitive files/folders
+# ----------------------------------------------------------------------
+# The front controller now lives in the project root, so the application
+# and framework folders sit under the web root. Block direct web access
+# to anything that isn't meant to be served.
+
+# Block dotfiles such as .env and .git
+<FilesMatch "^\.">
+	Require all denied
+</FilesMatch>
+
+# Block the framework/application folders entirely
+RedirectMatch 403 ^/erp-backend/(app|system|writable|tests|vendor)/.*$
+
+# ----------------------------------------------------------------------
 # Rewrite engine
 # ----------------------------------------------------------------------
 
@@ -11,20 +26,14 @@ Options -Indexes
 	Options +FollowSymlinks
 	RewriteEngine On
 
-	# If you installed CodeIgniter in a subfolder, you will need to
-	# change the following line to match the subfolder you need.
-	# http://httpd.apache.org/docs/current/mod/mod_rewrite.html#rewritebase
-	# RewriteBase /
+	# Served from the "erp-backend" subfolder of the Laragon web root,
+	# i.e. http://localhost/erp-backend/
+	RewriteBase /erp-backend/
 
 	# Redirect Trailing Slashes...
 	RewriteCond %{REQUEST_FILENAME} !-d
 	RewriteCond %{REQUEST_URI} (.+)/$
 	RewriteRule ^ %1 [L,R=301]
-
-	# Rewrite "www.example.com -> example.com"
-	RewriteCond %{HTTPS} !=on
-	RewriteCond %{HTTP_HOST} ^www\.(.+)$ [NC]
-	RewriteRule ^ http://%1%{REQUEST_URI} [R=301,L]
 
 	# Checks to see if the user is attempting to access a valid file,
 	# such as an image or css document, if this isn't true it sends the
@@ -33,7 +42,7 @@ Options -Indexes
 	RewriteCond %{REQUEST_FILENAME} !-d
 	RewriteRule ^([\s\S]*)$ index.php/$1 [L,NC,QSA]
 
-	# Ensure Authorization header is passed along
+	# Ensure Authorization header is passed along (needed for JWT Bearer tokens)
 	RewriteCond %{HTTP:Authorization} .
 	RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 </IfModule>
