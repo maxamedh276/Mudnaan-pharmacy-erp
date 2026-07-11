@@ -1,0 +1,5316 @@
+{
+  "info": {
+    "_postman_id": "eab83770-c566-4bac-b527-f4de4da4b78f",
+    "name": "Mudnaan ERP API",
+    "description": "Complete QA collection for the Mudnaan ERP backend (CodeIgniter 4, JWT, tenant-per-database).\n\nHOW TO RUN\n1. Import this collection AND the environment file, select the 'Mudnaan ERP \u2014 Local' environment.\n2. Run 'Authentication \u2192 Login (Owner)' once \u2014 every other request then authenticates automatically via {{token}}.\n3. Or run the WHOLE collection with the Collection Runner: folders are ordered so created resources feed later requests (category \u2192 product \u2192 customer/supplier \u2192 purchase/sale \u2192 documents \u2192 accounting).\n\nNOTES\n- Demo tenant is PREMIUM, so premium routes return 200. On a basic tenant they return 403 PLAN_UPGRADE_REQUIRED.\n- Financial periods have unique date ranges: the second full run gets PERIOD_OVERLAP on 'Create period' (correct behavior) \u2014 delete the April 2026 period or change its dates to re-run.\n- Staff user management endpoints are not in the API yet.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "cashier_token",
+      "value": ""
+    },
+    {
+      "key": "category_id",
+      "value": ""
+    },
+    {
+      "key": "product_id",
+      "value": ""
+    },
+    {
+      "key": "customer_id",
+      "value": ""
+    },
+    {
+      "key": "supplier_id",
+      "value": ""
+    },
+    {
+      "key": "purchase_id",
+      "value": ""
+    },
+    {
+      "key": "sale_id",
+      "value": ""
+    },
+    {
+      "key": "invoice_id",
+      "value": ""
+    },
+    {
+      "key": "deposit_id",
+      "value": ""
+    },
+    {
+      "key": "bill_id",
+      "value": ""
+    },
+    {
+      "key": "period_id",
+      "value": ""
+    },
+    {
+      "key": "bank_account_id",
+      "value": ""
+    },
+    {
+      "key": "budget_id",
+      "value": ""
+    },
+    {
+      "key": "journal_id",
+      "value": ""
+    },
+    {
+      "key": "rent_account_id",
+      "value": ""
+    },
+    {
+      "key": "cash_account_id",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "description": "Login stores the JWT in {{token}} automatically; every other request uses it via collection-level bearer auth. Demo users: yasir@demo.com (Owner, all permissions) and cashier@demo.com (Cashier, POS-level permissions), both password Secret123!.",
+      "item": [
+        {
+          "name": "Login (Owner) \u2014 stores token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Public. Returns token + user + plan + permissions. Stores {{token}} for the whole collection.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identity\": \"{{identity}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "// 'data' is reserved in the Postman sandbox \u2014 use another name.",
+                  "const payload = pm.response.json().data;",
+                  "pm.collectionVariables.set('token', payload.token);",
+                  "pm.test('Token + permissions present', () => {",
+                  "    pm.expect(payload.token).to.be.a('string');",
+                  "    pm.expect(payload.permissions).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login (Cashier) \u2014 stores cashier_token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Used by the Access Control folder to prove 403s.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identity\": \"cashier@demo.com\",\n  \"password\": \"Secret123!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('cashier_token', pm.response.json().data.token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login \u2014 wrong password (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Expected error case: INVALID_CREDENTIALS.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identity\": \"{{identity}}\",\n  \"password\": \"definitely-wrong\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is INVALID_CREDENTIALS', () => pm.expect(pm.response.json().error.code).to.eql('INVALID_CREDENTIALS'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login \u2014 missing fields (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Validation failure: identity and password required.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Me (current session)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Requires a valid token. Returns user + plan + permissions.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Me \u2014 no token (401)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            },
+            "description": "Expected error case: UNAUTHORIZED.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/refresh",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Issues a fresh JWT for a still-valid session.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/logout",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Stateless: client discards the token afterwards. (The collection keeps using {{token}}, which stays valid.)",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "description": "Home-screen KPIs. Permission: reports.basic (all roles, all plans).",
+      "item": [
+        {
+          "name": "Dashboard KPIs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reports/dashboard",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reports",
+                "dashboard"
+              ]
+            },
+            "description": "today {total_sales, net_profit, transactions}, stock alerts, pending purchases, recent sales, 7-day curve.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "const d = pm.response.json().data;",
+                  "pm.test('Has KPI sections', () => {",
+                  "    pm.expect(d).to.have.property('today');",
+                  "    pm.expect(d).to.have.property('stock');",
+                  "    pm.expect(d).to.have.property('recent_sales');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Categories",
+      "description": "Product grouping. Permissions: products.view / products.create.",
+      "item": [
+        {
+          "name": "List categories",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/categories",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "categories"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create category",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/categories",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "categories"
+              ]
+            },
+            "description": "Stores {{category_id}} for the product create below.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Test Category\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('category_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Products",
+      "description": "Catalog with per-branch stock. Permissions: products.view/create/edit/delete.",
+      "item": [
+        {
+          "name": "List products (paginated)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products?page=1&per_page=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Returns items + meta {page, per_page, total, total_pages}.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('Has pagination meta', () => pm.expect(pm.response.json().meta).to.have.property('total'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search products",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products?q=cola",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "cola"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filter \u2014 low stock",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products?stock=low",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "stock",
+                  "value": "low"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filter \u2014 out of stock",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products?stock=out",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "stock",
+                  "value": "out"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create product (opening stock 100)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ]
+            },
+            "description": "opening_stock writes an 'opening' ledger row so the product is sellable immediately. Stores {{product_id}}.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Energy Drink 250ml\",\n  \"sku\": \"PM-ED250\",\n  \"barcode\": \"6291041500213\",\n  \"category_id\": \"{{category_id}}\",\n  \"cost_price\": 0.55,\n  \"sell_price\": 1.0,\n  \"tax_rate\": 0,\n  \"reorder_level\": 10,\n  \"opening_stock\": 100\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('product_id', pm.response.json().data.id);",
+                  "pm.test('Opening stock applied', () => pm.expect(pm.response.json().data.quantity).to.eql(100));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get product by id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update product",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            },
+            "description": "Partial update \u2014 only sent fields change.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sell_price\": 1.1,\n  \"reorder_level\": 12\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('Price updated', () => pm.expect(pm.response.json().data.sell_price).to.eql(1.1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Product not found (404)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products/999999",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "999999"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create product \u2014 validation error (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ]
+            },
+            "description": "Missing name + negative price.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sell_price\": -5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is VALIDATION_ERROR', () => pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Inventory \u2014 Stock",
+      "description": "The stock ledger. Permissions: stock.view / stock.adjust.",
+      "item": [
+        {
+          "name": "Stock overview",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stock?per_page=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock"
+              ],
+              "query": [
+                {
+                  "key": "per_page",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "summary {total_units, stock_value, low_stock, out_of_stock} + per-product levels.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('Has summary', () => pm.expect(pm.response.json().data).to.have.property('summary'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Stock movements (all)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stock/movements?per_page=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock",
+                "movements"
+              ],
+              "query": [
+                {
+                  "key": "per_page",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Stock movements (one product)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stock/movements?product_id={{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock",
+                "movements"
+              ],
+              "query": [
+                {
+                  "key": "product_id",
+                  "value": "{{product_id}}"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Adjustment +5",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stock/adjustments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock",
+                "adjustments"
+              ]
+            },
+            "description": "Writes an 'adjustment' ledger row and updates the cache.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"qty_change\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Adjustment below zero (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stock/adjustments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock",
+                "adjustments"
+              ]
+            },
+            "description": "Guard: stock can never go negative.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"qty_change\": -99999\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is INSUFFICIENT_STOCK', () => pm.expect(pm.response.json().error.code).to.eql('INSUFFICIENT_STOCK'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Customers",
+      "description": "The tenant's shoppers. balance: + store credit / - owes us. Permissions: customers.view / customers.manage.",
+      "item": [
+        {
+          "name": "List customers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customers?page=1&per_page=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customers"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search customers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customers?q=hassan",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customers"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "hassan"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create customer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customers"
+              ]
+            },
+            "description": "Stores {{customer_id}} \u2014 used by sales, invoices, receipts and deposits below.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Customer\",\n  \"phone\": \"+252 61 5550101\",\n  \"email\": \"postman.customer@example.com\",\n  \"address\": \"Mogadishu\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('customer_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get customer",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customers/{{customer_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customers",
+                "{{customer_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update customer",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customers/{{customer_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customers",
+                "{{customer_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"address\": \"Hodan District, Mogadishu\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Suppliers",
+      "description": "Who the tenant buys from. Permissions: suppliers.view / suppliers.manage.",
+      "item": [
+        {
+          "name": "List suppliers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/suppliers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "suppliers"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create supplier",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/suppliers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "suppliers"
+              ]
+            },
+            "description": "Stores {{supplier_id}} \u2014 used by purchases and bills.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Trading LLC\",\n  \"phone\": \"+252 61 5550202\",\n  \"email\": \"sales@postmantrading.example\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('supplier_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get supplier",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/suppliers/{{supplier_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "suppliers",
+                "{{supplier_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update supplier",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/suppliers/{{supplier_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "suppliers",
+                "{{supplier_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"address\": \"Bakara Market, Mogadishu\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Purchases",
+      "description": "Goods received \u2014 ADDS stock (+qty ledger rows). A purchase that isn't fully paid auto-creates a linked supplier bill. Premium tenants also get the journal posting (Inventory / Cash + Accounts Payable). Permissions: purchases.view / purchases.create.",
+      "item": [
+        {
+          "name": "List purchases",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/purchases?page=1&per_page=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "purchases"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create purchase (partially paid \u2192 auto-bill)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/purchases",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "purchases"
+              ]
+            },
+            "description": "Total 25.00, pays 20.00 \u2192 a supplier bill for the outstanding 5.00 appears in Supplier Bills. Stores {{purchase_id}}.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplier_id\": \"{{supplier_id}}\",\n  \"reference_no\": \"PO-PM-001\",\n  \"paid_amount\": 20,\n  \"items\": [\n    {\n      \"product_id\": \"{{product_id}}\",\n      \"quantity\": 50,\n      \"unit_cost\": 0.5\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('purchase_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get purchase",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/purchases/{{purchase_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "purchases",
+                "{{purchase_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create purchase \u2014 no items (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/purchases",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "purchases"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplier_id\": \"{{supplier_id}}\",\n  \"items\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is EMPTY_PURCHASE', () => pm.expect(pm.response.json().error.code).to.eql('EMPTY_PURCHASE'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Sales / POS",
+      "description": "The POS flow. Totals are always recomputed server-side; a client uuid makes creation idempotent (offline-ready); credit sales require a customer and auto-create a customer invoice. Permissions: sales.view / sales.create.",
+      "item": [
+        {
+          "name": "List sales",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sales?page=1&per_page=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sales"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filter sales by status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sales?status=partial",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sales"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "partial"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create cash sale",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sales",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sales"
+              ]
+            },
+            "description": "2 \u00d7 1.10 = 2.20 fully paid \u2192 status completed. Stock -2. Premium: auto journal entry. Stores {{sale_id}}.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"product_id\": \"{{product_id}}\",\n      \"quantity\": 2\n    }\n  ],\n  \"payments\": [\n    {\n      \"method\": \"cash\",\n      \"amount\": 2.2\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('sale_id', pm.response.json().data.id);",
+                  "pm.test('Sale completed', () => pm.expect(pm.response.json().data.status).to.eql('completed'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create credit sale (partial \u2192 auto-invoice)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sales",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sales"
+              ]
+            },
+            "description": "Pays 5.00 of 11.00 \u2192 status partial, customer owes 6.00, a customer invoice is auto-created (see Customer Invoices).",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"{{customer_id}}\",\n  \"items\": [\n    {\n      \"product_id\": \"{{product_id}}\",\n      \"quantity\": 10\n    }\n  ],\n  \"payments\": [\n    {\n      \"method\": \"cash\",\n      \"amount\": 5\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('Sale is partial', () => pm.expect(pm.response.json().data.status).to.eql('partial'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get sale (receipt shape)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sales/{{sale_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sales",
+                "{{sale_id}}"
+              ]
+            },
+            "description": "Header + line items + payments.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('Has items and payments', () => {",
+                  "    const d = pm.response.json().data;",
+                  "    pm.expect(d.items).to.be.an('array');",
+                  "    pm.expect(d.payments).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Oversell (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sales",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sales"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"product_id\": \"{{product_id}}\",\n      \"quantity\": 99999\n    }\n  ],\n  \"payments\": [\n    {\n      \"method\": \"cash\",\n      \"amount\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is INSUFFICIENT_STOCK', () => pm.expect(pm.response.json().error.code).to.eql('INSUFFICIENT_STOCK'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Empty sale (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sales",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sales"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [],\n  \"payments\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is EMPTY_SALE', () => pm.expect(pm.response.json().error.code).to.eql('EMPTY_SALE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Credit without customer (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sales",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sales"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"product_id\": \"{{product_id}}\",\n      \"quantity\": 1\n    }\n  ],\n  \"payments\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is CREDIT_REQUIRES_CUSTOMER', () => pm.expect(pm.response.json().error.code).to.eql('CREDIT_REQUIRES_CUSTOMER'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Customer Invoices",
+      "description": "Accounts receivable documents. Standalone invoices move stock and (Premium) post AR / Revenue / COGS; sale-linked ones are created automatically by partial POS sales and never double-post. Permissions: invoices.view / invoices.manage.",
+      "item": [
+        {
+          "name": "List invoices",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer-invoices?page=1&per_page=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer-invoices"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filter unpaid invoices",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer-invoices?status=unpaid",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer-invoices"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "unpaid"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create standalone invoice",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer-invoices",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer-invoices"
+              ]
+            },
+            "description": "Product line checks + moves stock; the free-text line is a service. Stores {{invoice_id}}.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"{{customer_id}}\",\n  \"due_date\": \"2026-08-31\",\n  \"items\": [\n    {\n      \"product_id\": \"{{product_id}}\",\n      \"quantity\": 3\n    },\n    {\n      \"description\": \"Delivery fee\",\n      \"quantity\": 1,\n      \"unit_price\": 2.0\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('invoice_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get invoice (with items + receipts)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer-invoices/{{invoice_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer-invoices",
+                "{{invoice_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create invoice \u2014 no customer (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer-invoices",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer-invoices"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"description\": \"x\",\n      \"quantity\": 1,\n      \"unit_price\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is CUSTOMER_REQUIRED', () => pm.expect(pm.response.json().error.code).to.eql('CUSTOMER_REQUIRED'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Customer Receipts",
+      "description": "Money in from customers. Settles an invoice (or goes on account), raises the customer balance, Premium posts Cash-Bank / AR. Permissions: invoices.view / invoices.manage.",
+      "item": [
+        {
+          "name": "List receipts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer-receipts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer-receipts"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Receipt against invoice",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer-receipts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer-receipts"
+              ]
+            },
+            "description": "Invoice paid_total rises; status \u2192 partial/paid.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"invoice_id\": \"{{invoice_id}}\",\n  \"amount\": 2.0,\n  \"method\": \"cash\",\n  \"reference\": \"PM-RCV-1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Overpayment (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer-receipts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer-receipts"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"invoice_id\": \"{{invoice_id}}\",\n  \"amount\": 99999\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is OVERPAYMENT', () => pm.expect(pm.response.json().error.code).to.eql('OVERPAYMENT'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Customer Deposits",
+      "description": "Advances / store credit. Premium posts Cash-Bank / Customer Deposits (liability 2200). Refund returns the unused amount. Permissions: invoices.view / invoices.manage.",
+      "item": [
+        {
+          "name": "List deposits",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer-deposits",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer-deposits"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create deposit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer-deposits",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer-deposits"
+              ]
+            },
+            "description": "Customer balance +25 (store credit). Stores {{deposit_id}}.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"{{customer_id}}\",\n  \"amount\": 25,\n  \"method\": \"cash\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('deposit_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refund deposit",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer-deposits/{{deposit_id}}/refund",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer-deposits",
+                "{{deposit_id}}",
+                "refund"
+              ]
+            },
+            "description": "Refunds the unused amount, reverses balance + posting.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('Refunded', () => pm.expect(pm.response.json().data.status).to.eql('refunded'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refund again (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer-deposits/{{deposit_id}}/refund",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer-deposits",
+                "{{deposit_id}}",
+                "refund"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is DEPOSIT_NOT_ACTIVE', () => pm.expect(pm.response.json().error.code).to.eql('DEPOSIT_NOT_ACTIVE'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Supplier Bills",
+      "description": "Accounts payable documents. Standalone bills (services) post General Expense / AP on Premium; purchase-linked bills are auto-created by partially-paid purchases and never double-post. Permissions: bills.view / bills.manage.",
+      "item": [
+        {
+          "name": "List bills",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/supplier-bills?page=1&per_page=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "supplier-bills"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filter unpaid bills",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/supplier-bills?status=unpaid",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "supplier-bills"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "unpaid"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create standalone bill (service)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/supplier-bills",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "supplier-bills"
+              ]
+            },
+            "description": "Stores {{bill_id}}.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplier_id\": \"{{supplier_id}}\",\n  \"due_date\": \"2026-08-20\",\n  \"items\": [\n    {\n      \"description\": \"Warehouse rent August\",\n      \"quantity\": 1,\n      \"unit_cost\": 150.0\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('bill_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get bill (with items + payments)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/supplier-bills/{{bill_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "supplier-bills",
+                "{{bill_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create bill \u2014 no supplier (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/supplier-bills",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "supplier-bills"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"description\": \"x\",\n      \"quantity\": 1,\n      \"unit_cost\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is SUPPLIER_REQUIRED', () => pm.expect(pm.response.json().error.code).to.eql('SUPPLIER_REQUIRED'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Supplier Payments",
+      "description": "Money out to suppliers. Settles a bill (or on account); Premium posts AP / Cash-or-Bank. Permissions: bills.view / bills.manage.",
+      "item": [
+        {
+          "name": "List payments",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/supplier-payments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "supplier-payments"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pay part of the bill",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/supplier-payments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "supplier-payments"
+              ]
+            },
+            "description": "Bill paid_total 100 of 150 \u2192 status partial.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bill_id\": \"{{bill_id}}\",\n  \"amount\": 100,\n  \"method\": \"cash\",\n  \"reference\": \"PM-PAY-1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Overpayment (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/supplier-payments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "supplier-payments"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bill_id\": \"{{bill_id}}\",\n  \"amount\": 99999\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is OVERPAYMENT', () => pm.expect(pm.response.json().error.code).to.eql('OVERPAYMENT'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Reports (Premium)",
+      "description": "Advanced reports \u2014 behind plan:premium + reports.advanced. Basic-plan tenants get 403 PLAN_UPGRADE_REQUIRED here.",
+      "item": [
+        {
+          "name": "Sales report (this month)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reports/sales",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reports",
+                "sales"
+              ]
+            },
+            "description": "Totals, gross profit, daily curve, top products.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sales report (date range)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reports/sales?date_from=2026-07-01&date_to=2026-07-31",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reports",
+                "sales"
+              ],
+              "query": [
+                {
+                  "key": "date_from",
+                  "value": "2026-07-01"
+                },
+                {
+                  "key": "date_to",
+                  "value": "2026-07-31"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Inventory report",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reports/inventory",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reports",
+                "inventory"
+              ]
+            },
+            "description": "Stock value by category + low-stock items.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Accounting \u2014 Chart of Accounts",
+      "description": "Premium. Permission: accounting.view. Balances are computed live from journal_entry_lines on the account's normal-balance side.",
+      "item": [
+        {
+          "name": "List accounts with balances",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/accounts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('Accounts have balances', () => {",
+                  "    const first = pm.response.json().data[0];",
+                  "    pm.expect(first).to.have.property('balance');",
+                  "    pm.expect(first).to.have.property('normal_balance');",
+                  "});",
+                  "const acc = pm.response.json().data.find(a => a.code === '6100');",
+                  "if (acc) pm.collectionVariables.set('rent_account_id', acc.id);",
+                  "const cash = pm.response.json().data.find(a => a.code === '1000');",
+                  "if (cash) pm.collectionVariables.set('cash_account_id', cash.id);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Accounting \u2014 Journal Entries",
+      "description": "Premium. accounting.view to read, accounting.manage to create manual entries. Every operational document (sale, purchase, bill, receipt, deposit\u2026) traces here via source_type/source_id.",
+      "item": [
+        {
+          "name": "List journal entries",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/journal-entries?page=1&per_page=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "journal-entries"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "const first = pm.response.json().data[0];",
+                  "if (first) pm.collectionVariables.set('journal_id', first.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filter by source type",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/journal-entries?source_type=sale",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "journal-entries"
+              ],
+              "query": [
+                {
+                  "key": "source_type",
+                  "value": "sale"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get entry with lines",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/journal-entries/{{journal_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "journal-entries",
+                "{{journal_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('Debits equal credits', () => {",
+                  "    const d = pm.response.json().data;",
+                  "    pm.expect(d.total_debit).to.eql(d.total_credit);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create manual entry",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/journal-entries",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "journal-entries"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Postman manual entry \\u2014 office supplies\",\n  \"lines\": [\n    {\n      \"account_id\": \"{{rent_account_id}}\",\n      \"debit\": 40\n    },\n    {\n      \"account_id\": \"{{cash_account_id}}\",\n      \"credit\": 40\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unbalanced entry (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/journal-entries",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "journal-entries"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lines\": [\n    {\n      \"account_id\": \"{{rent_account_id}}\",\n      \"debit\": 100\n    },\n    {\n      \"account_id\": \"{{cash_account_id}}\",\n      \"credit\": 60\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is UNBALANCED_ENTRY', () => pm.expect(pm.response.json().error.code).to.eql('UNBALANCED_ENTRY'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Accounting \u2014 Financial Periods",
+      "description": "Premium. accounting.view to list; periods.manage (Owner only) to create/close/reopen. A closed period rejects ALL postings dated inside it. NOTE: period ranges are unique \u2014 a second collection run will get PERIOD_OVERLAP on create, which is correct behavior.",
+      "item": [
+        {
+          "name": "List periods",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/financial-periods",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "financial-periods"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create period (April 2026)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/financial-periods",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "financial-periods"
+              ]
+            },
+            "description": "Stores {{period_id}}.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"April 2026\",\n  \"start_date\": \"2026-04-01\",\n  \"end_date\": \"2026-04-30\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('period_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Close period",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/financial-periods/{{period_id}}/close",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "financial-periods",
+                "{{period_id}}",
+                "close"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('Closed', () => pm.expect(pm.response.json().data.status).to.eql('closed'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Posting into closed period (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/journal-entries",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "journal-entries"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entry_date\": \"2026-04-15\",\n  \"description\": \"backdated\",\n  \"lines\": [\n    {\n      \"account_id\": \"{{rent_account_id}}\",\n      \"debit\": 10\n    },\n    {\n      \"account_id\": \"{{cash_account_id}}\",\n      \"credit\": 10\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is PERIOD_CLOSED', () => pm.expect(pm.response.json().error.code).to.eql('PERIOD_CLOSED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reopen period",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/financial-periods/{{period_id}}/reopen",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "financial-periods",
+                "{{period_id}}",
+                "reopen"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Overlapping period (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/financial-periods",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "financial-periods"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Overlap test\",\n  \"start_date\": \"2026-04-15\",\n  \"end_date\": \"2026-05-15\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is PERIOD_OVERLAP', () => pm.expect(pm.response.json().error.code).to.eql('PERIOD_OVERLAP'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Accounting \u2014 Bank Accounts",
+      "description": "Premium. banking.view / banking.manage. Each bank account auto-creates its own GL account (1011, 1012, \u2026); its balance is always derived from the journal. Opening balance posts Bank / Owner's Capital.",
+      "item": [
+        {
+          "name": "List bank accounts (with live balances)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/bank-accounts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bank-accounts"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create bank account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/bank-accounts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bank-accounts"
+              ]
+            },
+            "description": "Stores {{bank_account_id}}. Balance starts at 1000 via an opening journal entry.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Bank USD\",\n  \"bank_name\": \"Postman Bank\",\n  \"account_number\": \"99887766\",\n  \"currency\": \"USD\",\n  \"opening_balance\": 1000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('bank_account_id', pm.response.json().data.id);",
+                  "pm.test('Opening balance on the books', () => pm.expect(pm.response.json().data.balance).to.eql(1000));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update bank account",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/bank-accounts/{{bank_account_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bank-accounts",
+                "{{bank_account_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bank_name\": \"Postman Bank International\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Receipt into this bank",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer-receipts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer-receipts"
+              ]
+            },
+            "description": "On-account receipt hitting the bank's GL \u2014 balance becomes 1005 on the next list call.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"{{customer_id}}\",\n  \"amount\": 5,\n  \"method\": \"bank\",\n  \"bank_account_id\": \"{{bank_account_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Accounting \u2014 Budget vs Actual",
+      "description": "Premium. budgets.view / budgets.manage (Owner). Budgets plan amounts per GL account for a date range; the show endpoint IS the budget-vs-actual report (budgeted, actual from the journal, variance, used %).",
+      "item": [
+        {
+          "name": "List budgets",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/budgets",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "budgets"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create budget",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/budgets",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "budgets"
+              ]
+            },
+            "description": "Stores {{budget_id}}.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Opex Budget\",\n  \"start_date\": \"2026-07-01\",\n  \"end_date\": \"2026-07-31\",\n  \"lines\": [\n    {\n      \"account_id\": \"{{rent_account_id}}\",\n      \"amount\": 500\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('budget_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Budget vs Actual report",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/budgets/{{budget_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "budgets",
+                "{{budget_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('Report has totals + lines', () => {",
+                  "    const d = pm.response.json().data;",
+                  "    pm.expect(d.totals).to.have.property('variance');",
+                  "    pm.expect(d.lines[0]).to.have.property('used_pct');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create budget \u2014 no lines (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/budgets",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "budgets"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Empty\",\n  \"start_date\": \"2026-07-01\",\n  \"end_date\": \"2026-07-31\",\n  \"lines\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is EMPTY_BUDGET', () => pm.expect(pm.response.json().error.code).to.eql('EMPTY_BUDGET'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Access Control (401 / 403)",
+      "description": "Proves the three protection layers: missing token (401), missing permission (403 FORBIDDEN, e.g. Cashier writing finance documents), and plan gating (403 PLAN_UPGRADE_REQUIRED for Basic-plan tenants on premium routes \u2014 the demo tenant is premium, so that case needs a basic tenant to reproduce). NOTE: staff user management endpoints are not part of the API yet; roles/permissions are seeded per tenant.",
+      "item": [
+        {
+          "name": "No token \u2192 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Garbage token \u2192 401",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer not-a-real-token"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is TOKEN_INVALID', () => pm.expect(pm.response.json().error.code).to.eql('TOKEN_INVALID'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cashier lists products \u2192 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{cashier_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ]
+            },
+            "description": "Cashier HAS products.view.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cashier creates product \u2192 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{cashier_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Should fail\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cashier creates supplier bill \u2192 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{cashier_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/supplier-bills",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "supplier-bills"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cashier lists bank accounts \u2192 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{cashier_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/bank-accounts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bank-accounts"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cashier reads customer invoices \u2192 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{cashier_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer-invoices",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer-invoices"
+              ]
+            },
+            "description": "Cashier HAS invoices.view (counter lookups).",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Cleanup",
+      "description": "Removes the throw-away product so repeat runs stay tidy. (Documents like sales/invoices are intentionally kept \u2014 they are history.)",
+      "item": [
+        {
+          "name": "Delete test product",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            },
+            "description": "Soft delete. Requires products.delete.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deleted product is gone (404)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "System Health",
+      "description": "Sanity check that the app responds at all \u2014 no auth involved.",
+      "item": [
+        {
+          "name": "Backend root responds",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": {
+              "raw": "{{root_url}}/",
+              "host": [
+                "{{root_url}}"
+              ],
+              "path": [
+                ""
+              ]
+            },
+            "description": "The CI4 welcome route. 200 = app + rewrite OK."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Root responds 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
