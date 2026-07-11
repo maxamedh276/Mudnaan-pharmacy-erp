@@ -113,18 +113,21 @@ class SalesService
             );
         }
 
-        // Credit portion goes onto the customer's account (- = owes us).
+        // Credit portion goes onto the customer's account (- = owes us)
+        // and becomes a receivable document (customer invoice).
         $unpaid = round($grandTotal - min($paidTotal, $grandTotal), 2);
+        $sale   = $this->sales->find($saleId);
 
         if ($unpaid > 0) {
             $database->table('customers')
                 ->where('id', (int) $data['customer_id'])
                 ->set('balance', 'balance - ' . $unpaid, false)
                 ->update();
+
+            (new ReceivablesService())->createFromSale($sale, $userId);
         }
 
         if ($plan === 'premium') {
-            $sale = $this->sales->find($saleId);
             $this->accounting->postSale($sale, $costOfGoods, $branchId, $userId);
         }
 

@@ -1,0 +1,195 @@
+%% ============================================================
+%%  ERP TENANT DATABASE — ENTITY RELATIONSHIP DIAGRAM (v2)
+%% ------------------------------------------------------------
+%%  Supersedes the original project ERD: adds the FINANCIAL
+%%  MANAGEMENT modules (supplier bills/payments, customer
+%%  invoices/receipts/deposits, financial periods, bank accounts,
+%%  budgets). Original core tables are kept with key fields only.
+%%  Timestamp/audit columns are omitted to keep it readable.
+%% ============================================================
+erDiagram
+
+    %% ---------- ORGANISATION ----------
+    BRANCHES ||--o{ USERS            : "employs"
+    BRANCHES ||--o{ SALES            : "rings up"
+    BRANCHES ||--o{ PURCHASES        : "receives"
+    BRANCHES ||--o{ STOCK_MOVEMENTS  : "tracks"
+    BRANCHES ||--o{ STOCK_LEVELS     : "holds"
+    BRANCHES ||--o{ SUPPLIER_BILLS   : "owes"
+    BRANCHES ||--o{ CUSTOMER_INVOICES: "issues"
+    BRANCHES ||--o{ BUDGETS          : "plans"
+
+    %% ---------- ACCESS CONTROL ----------
+    ROLES       ||--o{ USERS            : "assigned to"
+    ROLES       ||--o{ ROLE_PERMISSIONS : "has"
+    PERMISSIONS ||--o{ ROLE_PERMISSIONS : "granted via"
+
+    %% ---------- CATALOG ----------
+    CATEGORIES ||--o{ PRODUCTS        : "groups"
+    SUPPLIERS  ||--o{ PRODUCTS        : "supplies"
+    PRODUCTS   ||--o{ STOCK_MOVEMENTS : "moves"
+    PRODUCTS   ||--o{ STOCK_LEVELS    : "counted in"
+    PRODUCTS   ||--o{ SALE_ITEMS      : "sold as"
+    PRODUCTS   ||--o{ PURCHASE_ITEMS  : "bought as"
+
+    %% ---------- SALES (POS) ----------
+    CUSTOMERS ||--o{ SALES      : "buys in"
+    USERS     ||--o{ SALES      : "cashier of"
+    SALES     ||--o{ SALE_ITEMS : "contains"
+    SALES     ||--o{ PAYMENTS   : "paid by"
+
+    %% ---------- PURCHASES ----------
+    SUPPLIERS ||--o{ PURCHASES      : "sells to us"
+    PURCHASES ||--o{ PURCHASE_ITEMS : "contains"
+
+    %% ---------- ACCOUNTS PAYABLE (new) ----------
+    SUPPLIERS      ||--o{ SUPPLIER_BILLS      : "bills us"
+    PURCHASES      |o--o{ SUPPLIER_BILLS      : "generates (unpaid)"
+    SUPPLIER_BILLS ||--o{ SUPPLIER_BILL_ITEMS : "made of"
+    SUPPLIERS      ||--o{ SUPPLIER_PAYMENTS   : "is paid"
+    SUPPLIER_BILLS |o--o{ SUPPLIER_PAYMENTS   : "settled by"
+    BANK_ACCOUNTS  |o--o{ SUPPLIER_PAYMENTS   : "paid from"
+
+    %% ---------- ACCOUNTS RECEIVABLE (new) ----------
+    CUSTOMERS         ||--o{ CUSTOMER_INVOICES      : "owes via"
+    SALES             |o--o{ CUSTOMER_INVOICES      : "generates (unpaid)"
+    CUSTOMER_INVOICES ||--o{ CUSTOMER_INVOICE_ITEMS : "made of"
+    CUSTOMERS         ||--o{ CUSTOMER_RECEIPTS      : "pays via"
+    CUSTOMER_INVOICES |o--o{ CUSTOMER_RECEIPTS      : "settled by"
+    CUSTOMERS         ||--o{ CUSTOMER_DEPOSITS      : "prepays via"
+    BANK_ACCOUNTS     |o--o{ CUSTOMER_RECEIPTS      : "received into"
+    BANK_ACCOUNTS     |o--o{ CUSTOMER_DEPOSITS      : "received into"
+
+    %% ---------- ACCOUNTING (Premium) ----------
+    ACCOUNT_TYPES   ||--o{ ACCOUNT_GROUPS      : "classifies"
+    ACCOUNT_GROUPS  ||--o{ ACCOUNTS            : "organises"
+    JOURNAL_ENTRIES ||--o{ JOURNAL_ENTRY_LINES : "made of"
+    ACCOUNTS        ||--o{ JOURNAL_ENTRY_LINES : "posted to"
+    ACCOUNTS        ||--|| BANK_ACCOUNTS       : "backs"
+    ACCOUNTS        ||--o{ BUDGET_LINES        : "budgeted in"
+    BUDGETS         ||--o{ BUDGET_LINES        : "made of"
+    USERS           |o--o{ FINANCIAL_PERIODS   : "closed by"
+
+    %% ============================================================
+    %%  NEW TABLE DEFINITIONS (key fields)
+    %% ============================================================
+
+    FINANCIAL_PERIODS {
+        bigint id PK
+        string name "May 2025"
+        date   start_date
+        date   end_date
+        enum   status "open / closed"
+        bigint closed_by FK
+    }
+
+    BANK_ACCOUNTS {
+        bigint id PK
+        bigint account_id FK "the GL account backing this bank"
+        string name
+        string bank_name
+        string account_number
+        string currency
+        decimal opening_balance
+    }
+
+    SUPPLIER_BILLS {
+        bigint id PK
+        string uuid
+        bigint branch_id FK
+        bigint supplier_id FK
+        bigint purchase_id FK "set when auto-created from a purchase"
+        string bill_no
+        date   bill_date
+        date   due_date
+        decimal total
+        decimal paid_total
+        enum   status "unpaid / partial / paid / cancelled"
+    }
+
+    SUPPLIER_BILL_ITEMS {
+        bigint id PK
+        bigint bill_id FK
+        bigint product_id FK "NULL = service line"
+        string description
+        decimal quantity
+        decimal unit_cost
+        decimal line_total
+    }
+
+    SUPPLIER_PAYMENTS {
+        bigint id PK
+        string uuid
+        bigint branch_id FK
+        bigint supplier_id FK
+        bigint bill_id FK "NULL = on account"
+        string payment_no
+        enum   method "cash / card / mobile_money / bank / cheque"
+        bigint bank_account_id FK
+        decimal amount
+    }
+
+    CUSTOMER_INVOICES {
+        bigint id PK
+        string uuid
+        bigint branch_id FK
+        bigint customer_id FK
+        bigint sale_id FK "set when auto-created from a POS sale"
+        string invoice_no
+        date   invoice_date
+        date   due_date
+        decimal total
+        decimal paid_total
+        enum   status "unpaid / partial / paid / cancelled"
+    }
+
+    CUSTOMER_INVOICE_ITEMS {
+        bigint id PK
+        bigint invoice_id FK
+        bigint product_id FK "NULL = service line"
+        string description
+        decimal quantity
+        decimal unit_price
+        decimal line_total
+    }
+
+    CUSTOMER_RECEIPTS {
+        bigint id PK
+        string uuid
+        bigint branch_id FK
+        bigint customer_id FK
+        bigint invoice_id FK "NULL = on account"
+        string receipt_no
+        enum   method
+        bigint bank_account_id FK
+        decimal amount
+    }
+
+    CUSTOMER_DEPOSITS {
+        bigint id PK
+        string uuid
+        bigint branch_id FK
+        bigint customer_id FK
+        string deposit_no
+        enum   method
+        bigint bank_account_id FK
+        decimal amount
+        decimal used_amount
+        enum   status "active / used / refunded"
+    }
+
+    BUDGETS {
+        bigint id PK
+        bigint branch_id FK
+        string name
+        date   start_date
+        date   end_date
+        enum   status "active / archived"
+    }
+
+    BUDGET_LINES {
+        bigint id PK
+        bigint budget_id FK
+        bigint account_id FK
+        decimal amount "planned for the range"
+    }

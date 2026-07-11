@@ -98,9 +98,16 @@ class PurchaseService
             );
         }
 
+        $purchase = $this->purchases->find($purchaseId);
+
         if ($plan === 'premium') {
-            $purchase = $this->purchases->find($purchaseId);
             $this->accounting->postPurchase($purchase, min($paidAmount, $total), $branchId, $userId);
+        }
+
+        // The unpaid part becomes a payable document so the Supplier
+        // Bills screen tracks it. Posting already happened above.
+        if ($paidAmount < $total && ! empty($purchase['supplier_id'])) {
+            (new PayablesService())->createFromPurchase($purchase, $paidAmount, $userId);
         }
 
         $database->transComplete();

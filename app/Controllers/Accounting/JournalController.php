@@ -132,6 +132,14 @@ class JournalController extends BaseApiController
         } catch (InvalidArgumentException | RuntimeException $exception) {
             $database->transRollback();
 
+            if ($exception->getMessage() === 'PERIOD_CLOSED') {
+                return $this->respondError(
+                    'PERIOD_CLOSED',
+                    'That date falls in a closed financial period.',
+                    422,
+                );
+            }
+
             return $this->respondError('UNBALANCED_ENTRY', $exception->getMessage(), 422);
         }
 

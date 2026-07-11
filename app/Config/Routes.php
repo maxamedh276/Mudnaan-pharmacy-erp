@@ -60,6 +60,24 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers'], static function (Ro
         $routes->put('suppliers/(:num)', 'People\SuppliersController::update/$1');
         $routes->delete('suppliers/(:num)', 'People\SuppliersController::delete/$1');
 
+        // Accounts payable — supplier bills + payments (all plans;
+        // journal posting only happens for premium tenants)
+        $routes->get('supplier-bills', 'Payables\SupplierBillsController::index');
+        $routes->post('supplier-bills', 'Payables\SupplierBillsController::create');
+        $routes->get('supplier-bills/(:num)', 'Payables\SupplierBillsController::show/$1');
+        $routes->get('supplier-payments', 'Payables\SupplierPaymentsController::index');
+        $routes->post('supplier-payments', 'Payables\SupplierPaymentsController::create');
+
+        // Accounts receivable — customer invoices, receipts, deposits
+        $routes->get('customer-invoices', 'Receivables\InvoicesController::index');
+        $routes->post('customer-invoices', 'Receivables\InvoicesController::create');
+        $routes->get('customer-invoices/(:num)', 'Receivables\InvoicesController::show/$1');
+        $routes->get('customer-receipts', 'Receivables\ReceiptsController::index');
+        $routes->post('customer-receipts', 'Receivables\ReceiptsController::create');
+        $routes->get('customer-deposits', 'Receivables\DepositsController::index');
+        $routes->post('customer-deposits', 'Receivables\DepositsController::create');
+        $routes->post('customer-deposits/(:num)/refund', 'Receivables\DepositsController::refund/$1');
+
         // Basic dashboard (all plans)
         $routes->get('reports/dashboard', 'Reports\ReportsController::dashboard');
 
@@ -71,6 +89,22 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers'], static function (Ro
             $routes->get('journal-entries', 'Accounting\JournalController::index');
             $routes->post('journal-entries', 'Accounting\JournalController::create');
             $routes->get('journal-entries/(:num)', 'Accounting\JournalController::show/$1');
+
+            // Financial periods
+            $routes->get('financial-periods', 'Accounting\FinancialPeriodsController::index');
+            $routes->post('financial-periods', 'Accounting\FinancialPeriodsController::create');
+            $routes->post('financial-periods/(:num)/close', 'Accounting\FinancialPeriodsController::close/$1');
+            $routes->post('financial-periods/(:num)/reopen', 'Accounting\FinancialPeriodsController::reopen/$1');
+
+            // Bank accounts
+            $routes->get('bank-accounts', 'Accounting\BankAccountsController::index');
+            $routes->post('bank-accounts', 'Accounting\BankAccountsController::create');
+            $routes->put('bank-accounts/(:num)', 'Accounting\BankAccountsController::update/$1');
+
+            // Budgets (budget vs actual)
+            $routes->get('budgets', 'Accounting\BudgetsController::index');
+            $routes->post('budgets', 'Accounting\BudgetsController::create');
+            $routes->get('budgets/(:num)', 'Accounting\BudgetsController::show/$1');
         });
     });
 });

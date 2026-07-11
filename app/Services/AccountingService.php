@@ -18,13 +18,17 @@ use RuntimeException;
  */
 class AccountingService
 {
-    private const CASH        = '1000';
-    private const RECEIVABLE  = '1100';
-    private const INVENTORY   = '1200';
-    private const PAYABLE     = '2000';
-    private const TAX_PAYABLE = '2100';
-    private const REVENUE     = '4000';
-    private const COGS        = '5000';
+    public const CASH            = '1000';
+    public const BANK_DEFAULT    = '1010';
+    public const RECEIVABLE      = '1100';
+    public const INVENTORY       = '1200';
+    public const PAYABLE         = '2000';
+    public const TAX_PAYABLE     = '2100';
+    public const DEPOSITS        = '2200';
+    public const OWNERS_CAPITAL  = '3000';
+    public const REVENUE         = '4000';
+    public const COGS            = '5000';
+    public const GENERAL_EXPENSE = '6900';
 
     /** @var array<string, int> account code => id, cached per request */
     private array $accountIds = [];
@@ -86,8 +90,184 @@ class AccountingService
     }
 
     /**
+     * A standalone supplier bill (services, utilities, rent invoices…):
+     *   DEBIT General Expense / CREDIT Accounts Payable.
+     * Goods flows post through purchases instead, so books and the
+     * stock ledger never diverge. Purchase-linked bills post nothing —
+     * the purchase already did.
+     */
+    public function postSupplierBill(array $bill, ?int $userId): void
+    {
+        $this->createEntry(
+            branchId: (int) $bill['branch_id'],
+            entryDate: (string) $bill['bill_date'],
+            description: 'Supplier bill ' . ($bill['bill_no'] ?: '#' . $bill['id']),
+            sourceType: 'supplier_bill',
+            sourceId: (int) $bill['id'],
+            lines: [
+                ['code' => self::GENERAL_EXPENSE, 'debit'  => (float) $bill['total']],
+                ['code' => self::PAYABLE,         'credit' => (float) $bill['total']],
+            ],
+            userId: $userId,
+        );
+    }
+
+    /**
+     * Money leaving for a supplier: DEBIT Accounts Payable /
+     * CREDIT Cash or the chosen bank account.
+     */
+    public function postSupplierPayment(array $payment, ?int $userId): void
+    {
+        $this->createEntry(
+            branchId: (int) $payment['branch_id'],
+            entryDate: substr((string) $payment['paid_at'], 0, 10),
+            description: 'Supplier payment ' . $payment['payment_no'],
+            sourceType: 'supplier_payment',
+            sourceId: (int) $payment['id'],
+            lines: [
+                ['code' => self::PAYABLE, 'debit' => (float) $payment['amount']],
+                [
+                    'account_id' => $this->cashOrBankAccountId($payment['bank_account_id'] ?? null, $payment['method']),
+                    'credit'     => (float) $payment['amount'],
+                ],
+            ],
+            userId: $userId,
+        );
+    }
+
+    /**
+     * A standalone customer invoice (credit sale as a document):
+     *   DEBIT Accounts Receivable / CREDIT Revenue + Tax Payable,
+     *   plus COGS/Inventory for any product lines.
+     * Sale-linked invoices post nothing — the sale already did.
+     */
+    public function postCustomerInvoice(array $invoice, float $costOfGoods, ?int $userId): void
+    {
+        $lines = [
+            ['code' => self::RECEIVABLE,  'debit'  => (float) $invoice['total']],
+            ['code' => self::REVENUE,     'credit' => round($invoice['total'] - $invoice['tax_total'], 2)],
+            ['code' => self::TAX_PAYABLE, 'credit' => (float) $invoice['tax_total']],
+            ['code' => self::COGS,        'debit'  => $costOfGoods],
+            ['code' => self::INVENTORY,   'credit' => $costOfGoods],
+        ];
+
+        $this->createEntry(
+            branchId: (int) $invoice['branch_id'],
+            entryDate: (string) $invoice['invoice_date'],
+            description: 'Invoice ' . $invoice['invoice_no'],
+            sourceType: 'customer_invoice',
+            sourceId: (int) $invoice['id'],
+            lines: $lines,
+            userId: $userId,
+        );
+    }
+
+    /**
+     * Money received from a customer: DEBIT Cash/Bank / CREDIT AR.
+     */
+    public function postCustomerReceipt(array $receipt, ?int $userId): void
+    {
+        $this->createEntry(
+            branchId: (int) $receipt['branch_id'],
+            entryDate: substr((string) $receipt['received_at'], 0, 10),
+            description: 'Receipt ' . $receipt['receipt_no'],
+            sourceType: 'customer_receipt',
+            sourceId: (int) $receipt['id'],
+            lines: [
+                [
+                    'account_id' => $this->cashOrBankAccountId($receipt['bank_account_id'] ?? null, $receipt['method']),
+                    'debit'      => (float) $receipt['amount'],
+                ],
+                ['code' => self::RECEIVABLE, 'credit' => (float) $receipt['amount']],
+            ],
+            userId: $userId,
+        );
+    }
+
+    /**
+     * An advance from a customer is a LIABILITY until it is spent:
+     *   DEBIT Cash/Bank / CREDIT Customer Deposits.
+     * A refund posts the exact reverse.
+     */
+    public function postCustomerDeposit(array $deposit, ?int $userId, bool $refund = false): void
+    {
+        $moneyLine = [
+            'account_id' => $this->cashOrBankAccountId($deposit['bank_account_id'] ?? null, $deposit['method']),
+        ];
+        $depositLine = ['code' => self::DEPOSITS];
+
+        if ($refund) {
+            $moneyLine['credit'] = (float) $deposit['amount'];
+            $depositLine['debit'] = (float) $deposit['amount'];
+        } else {
+            $moneyLine['debit'] = (float) $deposit['amount'];
+            $depositLine['credit'] = (float) $deposit['amount'];
+        }
+
+        $this->createEntry(
+            branchId: (int) $deposit['branch_id'],
+            entryDate: substr((string) $deposit['deposited_at'], 0, 10),
+            description: ($refund ? 'Deposit refund ' : 'Deposit ') . $deposit['deposit_no'],
+            sourceType: $refund ? 'deposit_refund' : 'customer_deposit',
+            sourceId: (int) $deposit['id'],
+            lines: [$moneyLine, $depositLine],
+            userId: $userId,
+        );
+    }
+
+    /**
+     * Opening balance when a bank account is registered:
+     *   DEBIT the bank's GL account / CREDIT Owner's Capital.
+     */
+    public function postBankOpening(int $branchId, int $glAccountId, float $amount, string $name, ?int $userId): void
+    {
+        if ($amount == 0.0) {
+            return;
+        }
+
+        $this->createEntry(
+            branchId: $branchId,
+            entryDate: date('Y-m-d'),
+            description: 'Opening balance — ' . $name,
+            sourceType: 'bank_opening',
+            sourceId: null,
+            lines: [
+                ['account_id' => $glAccountId, 'debit' => $amount],
+                ['code' => self::OWNERS_CAPITAL, 'credit' => $amount],
+            ],
+            userId: $userId,
+        );
+    }
+
+    /**
+     * Which GL account money physically hits: an explicit bank account
+     * wins; otherwise cash goes to Cash on Hand and every electronic
+     * method defaults to the built-in Bank Account.
+     */
+    public function cashOrBankAccountId(?int $bankAccountId, string $method): int
+    {
+        if ($bankAccountId !== null && $bankAccountId > 0) {
+            $row = db_connect()->table('bank_accounts')
+                ->select('account_id')
+                ->where('id', $bankAccountId)
+                ->where('deleted_at', null)
+                ->get()
+                ->getRowArray();
+
+            if ($row === null) {
+                throw new InvalidArgumentException('BANK_ACCOUNT_NOT_FOUND');
+            }
+
+            return (int) $row['account_id'];
+        }
+
+        return $this->accountIdByCode($method === 'cash' ? self::CASH : self::BANK_DEFAULT);
+    }
+
+    /**
      * Writes one balanced journal entry + its lines. Zero-amount lines
      * are dropped; debits must equal credits or nothing is saved.
+     * Entries dated inside a CLOSED financial period are rejected.
      *
      * @param list<array{code?: string, account_id?: int, debit?: float, credit?: float, description?: string}> $lines
      */
@@ -101,6 +281,16 @@ class AccountingService
         ?int $userId = null,
     ): int {
         $database = db_connect();
+
+        $closedPeriod = $database->table('financial_periods')
+            ->where('status', 'closed')
+            ->where('start_date <=', $entryDate)
+            ->where('end_date >=', $entryDate)
+            ->countAllResults();
+
+        if ($closedPeriod > 0) {
+            throw new RuntimeException('PERIOD_CLOSED');
+        }
 
         $totalDebit  = 0.0;
         $totalCredit = 0.0;
