@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "cda6a12b-3178-49a3-8377-6930d5bab92c",
+    "_postman_id": "0288bf85-32b9-465f-9ad1-514aaf80e39c",
     "name": "Mudnaan ERP API",
     "description": "Complete QA collection for the Mudnaan ERP backend (CodeIgniter 4, JWT, tenant-per-database).\n\nHOW TO RUN\n1. Import this collection AND the environment file, select the 'Mudnaan ERP \u2014 Local' environment.\n2. Run 'Authentication \u2192 Login (Owner)' once \u2014 every other request then authenticates automatically via {{token}}.\n3. Or run the WHOLE collection with the Collection Runner: folders are ordered so created resources feed later requests (category \u2192 product \u2192 customer/supplier \u2192 purchase/sale \u2192 documents \u2192 accounting).\n\nNOTES\n- Demo tenant is PREMIUM, so premium routes return 200. On a basic tenant they return 403 PLAN_UPGRADE_REQUIRED.\n- Financial periods have unique date ranges: the second full run gets PERIOD_OVERLAP on 'Create period' (correct behavior) \u2014 delete the April 2026 period or change its dates to re-run.\n- Staff user management endpoints are not in the API yet.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
@@ -86,6 +86,46 @@
     },
     {
       "key": "stock_value_before",
+      "value": ""
+    },
+    {
+      "key": "book_value_before",
+      "value": ""
+    },
+    {
+      "key": "own_user_id",
+      "value": ""
+    },
+    {
+      "key": "manager_role_id",
+      "value": ""
+    },
+    {
+      "key": "cashier_role_id",
+      "value": ""
+    },
+    {
+      "key": "owner_role_id",
+      "value": ""
+    },
+    {
+      "key": "role_id",
+      "value": ""
+    },
+    {
+      "key": "role_name",
+      "value": ""
+    },
+    {
+      "key": "staff_user_id",
+      "value": ""
+    },
+    {
+      "key": "mgr_email",
+      "value": ""
+    },
+    {
+      "key": "manager_token",
       "value": ""
     }
   ],
@@ -334,7 +374,7 @@
                 "me"
               ]
             },
-            "description": "Requires a valid token. Returns user + plan + permissions.",
+            "description": "Requires a valid token. Returns user + plan + permissions. Stores {{own_user_id}} for the self-deactivate guard test.",
             "auth": {
               "type": "noauth"
             }
@@ -350,7 +390,8 @@
                   "    const body = pm.response.json();",
                   "    pm.expect(body.success).to.be.true;",
                   "    pm.expect(body).to.have.property('data');",
-                  "});"
+                  "});",
+                  "pm.collectionVariables.set('own_user_id', pm.response.json().data.user.id);"
                 ]
               }
             }
@@ -1189,7 +1230,8 @@
                   "    pm.expect(s).to.have.property('stock_value');",
                   "    pm.expect(s).to.have.property('book_value');",
                   "});",
-                  "pm.collectionVariables.set('stock_value_before', s.stock_value);"
+                  "pm.collectionVariables.set('stock_value_before', s.stock_value);",
+                  "pm.collectionVariables.set('book_value_before', s.book_value);"
                 ]
               }
             }
@@ -1415,7 +1457,7 @@
           ]
         },
         {
-          "name": "Book value tracks stock value",
+          "name": "Book value moves with stock value",
           "request": {
             "method": "GET",
             "header": [
@@ -1443,7 +1485,7 @@
                 }
               ]
             },
-            "description": "After the adjustments, book_value should still equal stock_value (inventory and the ledger stay in step).",
+            "description": "The invariant: an adjustment moves stock_value and book_value by the SAME amount. We compare the deltas since the overview snapshot above (robust to any historical rounding), proving inventory and the ledger stay locked together.",
             "auth": {
               "type": "noauth"
             }
@@ -1461,9 +1503,11 @@
                   "    pm.expect(body).to.have.property('data');",
                   "});",
                   "const s = pm.response.json().data.summary;",
-                  "pm.test('stock_value == book_value', () => {",
+                  "const dStock = s.stock_value - Number(pm.collectionVariables.get('stock_value_before'));",
+                  "const dBook = s.book_value - Number(pm.collectionVariables.get('book_value_before'));",
+                  "pm.test('stock and book moved together', () => {",
                   "    if (s.book_value !== null)",
-                  "        pm.expect(Math.abs(s.stock_value - s.book_value)).to.be.below(0.01);",
+                  "        pm.expect(Math.abs(dStock - dBook)).to.be.below(0.01);",
                   "});"
                 ]
               }
@@ -4958,8 +5002,1090 @@
       ]
     },
     {
-      "name": "Access Control (401 / 403)",
-      "description": "Proves the three protection layers: missing token (401), missing permission (403 FORBIDDEN, e.g. Cashier writing finance documents), and plan gating (403 PLAN_UPGRADE_REQUIRED for Basic-plan tenants on premium routes \u2014 the demo tenant is premium, so that case needs a basic tenant to reproduce). NOTE: staff user management endpoints are not part of the API yet; roles/permissions are seeded per tenant.",
+      "name": "Roles & Permissions",
+      "description": "Role and permission management (Owner-level users.manage). A role is a named bundle of permission codes; editing a role's permissions takes effect on the NEXT request for every user who has it. System roles (Owner/Manager/Cashier) can be re-permissioned but not deleted.",
+      "item": [
+        {
+          "name": "List roles (+ permissions + user count)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/roles",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "roles"
+              ]
+            },
+            "description": "Stores {{manager_role_id}} and {{cashier_role_id}} for the Users folder.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "const roles = pm.response.json().data;",
+                  "pm.test('Roles carry permission codes', () => {",
+                  "    pm.expect(roles[0]).to.have.property('permissions');",
+                  "    pm.expect(roles[0]).to.have.property('user_count');",
+                  "});",
+                  "const mgr = roles.find(r => r.name === 'Manager');",
+                  "const csh = roles.find(r => r.name === 'Cashier');",
+                  "const own = roles.find(r => r.name === 'Owner');",
+                  "if (mgr) pm.collectionVariables.set('manager_role_id', mgr.id);",
+                  "if (csh) pm.collectionVariables.set('cashier_role_id', csh.id);",
+                  "if (own) pm.collectionVariables.set('owner_role_id', own.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Permission catalog",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/permissions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "permissions"
+              ]
+            },
+            "description": "Every permission code + description, for role forms.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get one role",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/roles/{{manager_role_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "roles",
+                "{{manager_role_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create custom role (view-only)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/roles",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "roles"
+              ]
+            },
+            "description": "Unique name each run. Stores {{role_id}}.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{role_name}}\",\n  \"permissions\": [\n    \"reports.basic\",\n    \"reports.advanced\",\n    \"accounting.view\",\n    \"stock.view\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('role_name', 'Auditor ' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('role_id', pm.response.json().data.id);",
+                  "pm.test('Got 4 permissions', () => pm.expect(pm.response.json().data.permissions).to.have.lengthOf(4));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update role permissions",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/roles/{{role_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "roles",
+                "{{role_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"permissions\": [\n    \"reports.basic\",\n    \"accounting.view\",\n    \"sales.view\",\n    \"sales.create\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('Now 4 permissions', () => pm.expect(pm.response.json().data.permissions).to.have.lengthOf(4));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Duplicate role name (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/roles",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "roles"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{role_name}}\",\n  \"permissions\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is ROLE_NAME_TAKEN', () => pm.expect(pm.response.json().error.code).to.eql('ROLE_NAME_TAKEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete system role \u2192 422",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/roles/{{owner_role_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "roles",
+                "{{owner_role_id}}"
+              ]
+            },
+            "description": "Built-in roles are protected.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is SYSTEM_ROLE', () => pm.expect(pm.response.json().error.code).to.eql('SYSTEM_ROLE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete custom (unused) role \u2192 200",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/roles/{{role_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "roles",
+                "{{role_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "description": "Staff account management (Owner-level users.manage). Creates a real manager account and logs in as it to drive the Access Control matrix. Run the Roles folder first (it stores the role ids).",
+      "item": [
+        {
+          "name": "List users (Owner)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create manager user",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "description": "Unique email each run. Stores {{staff_user_id}}.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Manager\",\n  \"email\": \"{{mgr_email}}\",\n  \"password\": \"Manager123!\",\n  \"role_id\": \"{{manager_role_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('mgr_email', 'pm_manager_' + Date.now() + '@demo.test');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('staff_user_id', pm.response.json().data.id);",
+                  "pm.test('Created as Manager, active', () => {",
+                  "    const u = pm.response.json().data;",
+                  "    pm.expect(u.role).to.eql('Manager');",
+                  "    pm.expect(u.is_active).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "New manager can log in \u2192 manager_token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Stores {{manager_token}} used by the Access Control matrix below.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identity\": \"{{mgr_email}}\",\n  \"password\": \"Manager123!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('manager_token', pm.response.json().data.token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get user",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/{{staff_user_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "{{staff_user_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update user (rename)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/{{staff_user_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "{{staff_user_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Manager (edited)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Duplicate email (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Dup\",\n  \"email\": \"{{mgr_email}}\",\n  \"password\": \"Manager123!\",\n  \"role_id\": \"{{manager_role_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is EMAIL_TAKEN', () => pm.expect(pm.response.json().error.code).to.eql('EMAIL_TAKEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Weak password (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Weak\",\n  \"email\": \"weak_{{$timestamp}}@demo.test\",\n  \"password\": \"12\",\n  \"role_id\": \"{{manager_role_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is WEAK_PASSWORD', () => pm.expect(pm.response.json().error.code).to.eql('WEAK_PASSWORD'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "No email or phone (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"NoId\",\n  \"password\": \"Manager123!\",\n  \"role_id\": \"{{manager_role_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is IDENTITY_REQUIRED', () => pm.expect(pm.response.json().error.code).to.eql('IDENTITY_REQUIRED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid role (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"BadRole\",\n  \"email\": \"badrole_{{$timestamp}}@demo.test\",\n  \"password\": \"Manager123!\",\n  \"role_id\": 999999\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is ROLE_NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('ROLE_NOT_FOUND'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cannot deactivate self (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users/{{own_user_id}}/active",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users",
+                "{{own_user_id}}",
+                "active"
+              ]
+            },
+            "description": "The acting user can't lock themselves out.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_active\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is CANNOT_DEACTIVATE_SELF', () => pm.expect(pm.response.json().error.code).to.eql('CANNOT_DEACTIVATE_SELF'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cashier cannot list users \u2192 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{cashier_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cashier cannot create user \u2192 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{cashier_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"X\",\n  \"email\": \"x@demo.test\",\n  \"password\": \"Manager123!\",\n  \"role_id\": \"{{cashier_role_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Access Control (RBAC matrix)",
+      "description": "The heart of RBAC: the SAME endpoint hit by Owner, Manager and Cashier, asserting exactly who reaches the handler (2xx / 422 = allowed) and who is blocked (403 FORBIDDEN). Reflects the seeded grants \u2014 Cashier = POS essentials, Manager = operational finance (no accounting.manage / users / settings / period close), Owner = everything. Run the Users folder first for {{manager_token}}. (POST bodies are intentionally empty: an allowed role reaches validation \u2014 422 \u2014 while a blocked role is stopped at 403.)",
       "item": [
         {
           "name": "No token \u2192 401",
@@ -5051,7 +6177,87 @@
           ]
         },
         {
-          "name": "Cashier lists products \u2192 200",
+          "name": "View products \u00b7 Owner \u2192 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Owner gets 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "View products \u00b7 Manager \u2192 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{manager_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Manager gets 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "View products \u00b7 Cashier \u2192 200",
           "request": {
             "method": "GET",
             "header": [
@@ -5073,7 +6279,7 @@
                 "products"
               ]
             },
-            "description": "Cashier HAS products.view.",
+            "description": "",
             "auth": {
               "type": "noauth"
             }
@@ -5084,19 +6290,112 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Envelope success=true', () => {",
-                  "    const body = pm.response.json();",
-                  "    pm.expect(body.success).to.be.true;",
-                  "    pm.expect(body).to.have.property('data');",
-                  "});"
+                  "pm.test('Cashier gets 200', () => pm.response.to.have.status(200));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Cashier creates product \u2192 403",
+          "name": "Create product \u00b7 Owner \u2192 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Owner gets 422', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create product \u00b7 Manager \u2192 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{manager_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Manager gets 422', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create product \u00b7 Cashier \u2192 403",
           "request": {
             "method": "POST",
             "header": [
@@ -5124,7 +6423,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Should fail\"\n}",
+              "raw": "{}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5138,21 +6437,353 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status is 403', () => pm.response.to.have.status(403));",
-                  "pm.test('Envelope success=false with error code', () => {",
-                  "    const body = pm.response.json();",
-                  "    pm.expect(body.success).to.be.false;",
-                  "    pm.expect(body.error).to.have.property('code');",
-                  "    pm.expect(body.error).to.have.property('message');",
-                  "});",
-                  "pm.test('Error code is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
+                  "pm.test('Cashier gets 403', () => pm.response.to.have.status(403));",
+                  "pm.test('403 is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Cashier creates supplier bill \u2192 403",
+          "name": "View stock \u00b7 Owner \u2192 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stock",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Owner gets 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "View stock \u00b7 Manager \u2192 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{manager_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stock",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Manager gets 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "View stock \u00b7 Cashier \u2192 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{cashier_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stock",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cashier gets 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read customer invoices \u00b7 Owner \u2192 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer-invoices",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer-invoices"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Owner gets 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read customer invoices \u00b7 Manager \u2192 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{manager_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer-invoices",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer-invoices"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Manager gets 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read customer invoices \u00b7 Cashier \u2192 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{cashier_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customer-invoices",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customer-invoices"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cashier gets 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create supplier bill \u00b7 Owner \u2192 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/supplier-bills",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "supplier-bills"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Owner gets 422', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create supplier bill \u00b7 Manager \u2192 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{manager_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/supplier-bills",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "supplier-bills"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Manager gets 422', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create supplier bill \u00b7 Cashier \u2192 403",
           "request": {
             "method": "POST",
             "header": [
@@ -5194,21 +6825,95 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status is 403', () => pm.response.to.have.status(403));",
-                  "pm.test('Envelope success=false with error code', () => {",
-                  "    const body = pm.response.json();",
-                  "    pm.expect(body.success).to.be.false;",
-                  "    pm.expect(body.error).to.have.property('code');",
-                  "    pm.expect(body.error).to.have.property('message');",
-                  "});",
-                  "pm.test('Error code is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
+                  "pm.test('Cashier gets 403', () => pm.response.to.have.status(403));",
+                  "pm.test('403 is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Cashier lists bank accounts \u2192 403",
+          "name": "View bank accounts \u00b7 Owner \u2192 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/bank-accounts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bank-accounts"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Owner gets 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "View bank accounts \u00b7 Manager \u2192 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{manager_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/bank-accounts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bank-accounts"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Manager gets 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "View bank accounts \u00b7 Cashier \u2192 403",
           "request": {
             "method": "GET",
             "header": [
@@ -5241,21 +6946,95 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status is 403', () => pm.response.to.have.status(403));",
-                  "pm.test('Envelope success=false with error code', () => {",
-                  "    const body = pm.response.json();",
-                  "    pm.expect(body.success).to.be.false;",
-                  "    pm.expect(body.error).to.have.property('code');",
-                  "    pm.expect(body.error).to.have.property('message');",
-                  "});",
-                  "pm.test('Error code is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
+                  "pm.test('Cashier gets 403', () => pm.response.to.have.status(403));",
+                  "pm.test('403 is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Cashier reads customer invoices \u2192 200",
+          "name": "View chart of accounts \u00b7 Owner \u2192 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/accounts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Owner gets 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "View chart of accounts \u00b7 Manager \u2192 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{manager_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/accounts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Manager gets 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "View chart of accounts \u00b7 Cashier \u2192 403",
           "request": {
             "method": "GET",
             "header": [
@@ -5269,15 +7048,15 @@
               }
             ],
             "url": {
-              "raw": "{{base_url}}/customer-invoices",
+              "raw": "{{base_url}}/accounts",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
-                "customer-invoices"
+                "accounts"
               ]
             },
-            "description": "Cashier HAS invoices.view (counter lookups).",
+            "description": "",
             "auth": {
               "type": "noauth"
             }
@@ -5288,12 +7067,674 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Envelope success=true', () => {",
-                  "    const body = pm.response.json();",
-                  "    pm.expect(body.success).to.be.true;",
-                  "    pm.expect(body).to.have.property('data');",
-                  "});"
+                  "pm.test('Cashier gets 403', () => pm.response.to.have.status(403));",
+                  "pm.test('403 is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Post manual journal (accounting.manage) \u00b7 Owner \u2192 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/journal-entries",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "journal-entries"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Owner gets 422', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Post manual journal (accounting.manage) \u00b7 Manager \u2192 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{manager_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/journal-entries",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "journal-entries"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Manager gets 403', () => pm.response.to.have.status(403));",
+                  "pm.test('403 is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Post manual journal (accounting.manage) \u00b7 Cashier \u2192 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{cashier_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/journal-entries",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "journal-entries"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cashier gets 403', () => pm.response.to.have.status(403));",
+                  "pm.test('403 is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Advanced sales report \u00b7 Owner \u2192 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reports/sales",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reports",
+                "sales"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Owner gets 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Advanced sales report \u00b7 Manager \u2192 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{manager_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reports/sales",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reports",
+                "sales"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Manager gets 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Advanced sales report \u00b7 Cashier \u2192 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{cashier_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/reports/sales",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reports",
+                "sales"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cashier gets 403', () => pm.response.to.have.status(403));",
+                  "pm.test('403 is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List users (users.manage) \u00b7 Owner \u2192 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Owner gets 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List users (users.manage) \u00b7 Manager \u2192 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{manager_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Manager gets 403', () => pm.response.to.have.status(403));",
+                  "pm.test('403 is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List users (users.manage) \u00b7 Cashier \u2192 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{cashier_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/users",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cashier gets 403', () => pm.response.to.have.status(403));",
+                  "pm.test('403 is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Audit log (settings.manage) \u00b7 Owner \u2192 200",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/audit-log",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "audit-log"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Owner gets 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Audit log (settings.manage) \u00b7 Manager \u2192 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{manager_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/audit-log",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "audit-log"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Manager gets 403', () => pm.response.to.have.status(403));",
+                  "pm.test('403 is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Audit log (settings.manage) \u00b7 Cashier \u2192 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{cashier_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/audit-log",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "audit-log"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cashier gets 403', () => pm.response.to.have.status(403));",
+                  "pm.test('403 is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create period (periods.manage) \u00b7 Owner \u2192 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/financial-periods",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "financial-periods"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Owner gets 422', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create period (periods.manage) \u00b7 Manager \u2192 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{manager_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/financial-periods",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "financial-periods"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Manager gets 403', () => pm.response.to.have.status(403));",
+                  "pm.test('403 is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create period (periods.manage) \u00b7 Cashier \u2192 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{cashier_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/financial-periods",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "financial-periods"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cashier gets 403', () => pm.response.to.have.status(403));",
+                  "pm.test('403 is FORBIDDEN', () => pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN'));"
                 ]
               }
             }

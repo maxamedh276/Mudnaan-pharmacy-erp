@@ -64,8 +64,15 @@ def error_code_test(code):
     ]
 
 
+def prerequest_script(lines):
+    return {
+        "listen": "prerequest",
+        "script": {"type": "text/javascript", "exec": lines},
+    }
+
+
 def req(name, method, path, *, body=None, description="", tests=None,
-        auth_token="{{token}}", no_auth=False, query=None):
+        auth_token="{{token}}", no_auth=False, query=None, prerequest=None):
     url_path = path.lstrip("/")
     url = {
         "raw": f"{BASE}/{url_path}" + (f"?{query}" if query else ""),
@@ -96,8 +103,13 @@ def req(name, method, path, *, body=None, description="", tests=None,
             "options": {"raw": {"language": "json"}},
         }
     item = {"name": name, "request": request}
+    events = []
+    if prerequest:
+        events.append(prerequest_script(prerequest))
     if tests:
-        item["event"] = [test_script(tests)]
+        events.append(test_script(tests))
+    if events:
+        item["event"] = events
     return item
 
 
@@ -146,8 +158,12 @@ authentication = folder("Authentication", (
         description="Validation failure: identity and password required.",
         tests=status_tests(422, False) + error_code_test("VALIDATION_ERROR")),
     req("Me (current session)", "GET", "auth/me",
-        description="Requires a valid token. Returns user + plan + permissions.",
-        tests=status_tests(200, True)),
+        description="Requires a valid token. Returns user + plan + permissions. "
+                    "Stores {{own_user_id}} for the self-deactivate guard test.",
+        tests=status_tests(200, True) + [
+            "pm.collectionVariables.set('own_user_id', "
+            "pm.response.json().data.user.id);",
+        ]),
     req("Me — no token (401)", "GET", "auth/me", no_auth=True,
         description="Expected error case: UNAUTHORIZED.",
         tests=status_tests(401, False)),
@@ -248,6 +264,7 @@ inventory = folder("Inventory — Stock", (
             "    pm.expect(s).to.have.property('book_value');",
             "});",
             "pm.collectionVariables.set('stock_value_before', s.stock_value);",
+            "pm.collectionVariables.set('book_value_before', s.book_value);",
         ]),
     req("Stock movements (all)", "GET", "stock/movements", query="per_page=10",
         description="Each row carries cost_value (|qty| × cost price).",
@@ -274,15 +291,22 @@ inventory = folder("Inventory — Stock", (
         description="Negative adjustment posts DEBIT Inventory Adjustment / "
                     "CREDIT Inventory — a stock loss on the P&L.",
         tests=status_tests(201, True)),
-    req("Book value tracks stock value", "GET", "stock", query="per_page=1",
-        description="After the adjustments, book_value should still equal "
-                    "stock_value (inventory and the ledger stay in step).",
+    req("Book value moves with stock value", "GET", "stock",
+        query="per_page=1",
+        description="The invariant: an adjustment moves stock_value and "
+                    "book_value by the SAME amount. We compare the deltas "
+                    "since the overview snapshot above (robust to any "
+                    "historical rounding), proving inventory and the ledger "
+                    "stay locked together.",
         tests=status_tests(200, True) + [
             "const s = pm.response.json().data.summary;",
-            "pm.test('stock_value == book_value', () => {",
+            "const dStock = s.stock_value - "
+            "Number(pm.collectionVariables.get('stock_value_before'));",
+            "const dBook = s.book_value - "
+            "Number(pm.collectionVariables.get('book_value_before'));",
+            "pm.test('stock and book moved together', () => {",
             "    if (s.book_value !== null)",
-            "        pm.expect(Math.abs(s.stock_value - s.book_value))"
-            ".to.be.below(0.01);",
+            "        pm.expect(Math.abs(dStock - dBook)).to.be.below(0.01);",
             "});",
         ]),
     req("Adjustment below zero (422)", "POST", "stock/adjustments",
@@ -656,37 +680,175 @@ budgets = folder("Accounting — Budget vs Actual", (
         tests=status_tests(422, False) + error_code_test("EMPTY_BUDGET")),
 ])
 
-access_control = folder("Access Control (401 / 403)", (
-    "Proves the three protection layers: missing token (401), missing "
-    "permission (403 FORBIDDEN, e.g. Cashier writing finance documents), "
-    "and plan gating (403 PLAN_UPGRADE_REQUIRED for Basic-plan tenants on "
-    "premium routes — the demo tenant is premium, so that case needs a "
-    "basic tenant to reproduce). NOTE: staff user management endpoints "
-    "are not part of the API yet; roles/permissions are seeded per tenant."
+roles = folder("Roles & Permissions", (
+    "Role and permission management (Owner-level users.manage). A role is "
+    "a named bundle of permission codes; editing a role's permissions "
+    "takes effect on the NEXT request for every user who has it. System "
+    "roles (Owner/Manager/Cashier) can be re-permissioned but not deleted."
+), [
+    req("List roles (+ permissions + user count)", "GET", "roles",
+        description="Stores {{manager_role_id}} and {{cashier_role_id}} for "
+                    "the Users folder.",
+        tests=status_tests(200, True) + [
+            "const roles = pm.response.json().data;",
+            "pm.test('Roles carry permission codes', () => {",
+            "    pm.expect(roles[0]).to.have.property('permissions');",
+            "    pm.expect(roles[0]).to.have.property('user_count');",
+            "});",
+            "const mgr = roles.find(r => r.name === 'Manager');",
+            "const csh = roles.find(r => r.name === 'Cashier');",
+            "const own = roles.find(r => r.name === 'Owner');",
+            "if (mgr) pm.collectionVariables.set('manager_role_id', mgr.id);",
+            "if (csh) pm.collectionVariables.set('cashier_role_id', csh.id);",
+            "if (own) pm.collectionVariables.set('owner_role_id', own.id);",
+        ]),
+    req("Permission catalog", "GET", "permissions",
+        description="Every permission code + description, for role forms.",
+        tests=status_tests(200, True)),
+    req("Get one role", "GET", "roles/{{manager_role_id}}",
+        tests=status_tests(200, True)),
+    req("Create custom role (view-only)", "POST", "roles",
+        prerequest=["pm.collectionVariables.set('role_name', "
+                    "'Auditor ' + Date.now());"],
+        body={"name": "{{role_name}}",
+              "permissions": ["reports.basic", "reports.advanced",
+                              "accounting.view", "stock.view"]},
+        description="Unique name each run. Stores {{role_id}}.",
+        tests=status_tests(201, True) + capture("role_id") + [
+            "pm.test('Got 4 permissions', () => "
+            "pm.expect(pm.response.json().data.permissions).to.have.lengthOf(4));",
+        ]),
+    req("Update role permissions", "PUT", "roles/{{role_id}}",
+        body={"permissions": ["reports.basic", "accounting.view",
+                              "sales.view", "sales.create"]},
+        tests=status_tests(200, True) + [
+            "pm.test('Now 4 permissions', () => "
+            "pm.expect(pm.response.json().data.permissions).to.have.lengthOf(4));",
+        ]),
+    req("Duplicate role name (422)", "POST", "roles",
+        body={"name": "{{role_name}}", "permissions": []},
+        tests=status_tests(422, False) + error_code_test("ROLE_NAME_TAKEN")),
+    req("Delete system role → 422", "DELETE", "roles/{{owner_role_id}}",
+        description="Built-in roles are protected.",
+        tests=status_tests(422, False) + error_code_test("SYSTEM_ROLE")),
+    req("Delete custom (unused) role → 200", "DELETE", "roles/{{role_id}}",
+        tests=status_tests(200, True)),
+])
+
+users = folder("Users", (
+    "Staff account management (Owner-level users.manage). Creates a real "
+    "manager account and logs in as it to drive the Access Control matrix. "
+    "Run the Roles folder first (it stores the role ids)."
+), [
+    req("List users (Owner)", "GET", "users",
+        tests=status_tests(200, True)),
+    req("Create manager user", "POST", "users",
+        prerequest=["pm.collectionVariables.set('mgr_email', "
+                    "'pm_manager_' + Date.now() + '@demo.test');"],
+        body={"name": "Postman Manager", "email": "{{mgr_email}}",
+              "password": "Manager123!", "role_id": "{{manager_role_id}}"},
+        description="Unique email each run. Stores {{staff_user_id}}.",
+        tests=status_tests(201, True) + capture("staff_user_id") + [
+            "pm.test('Created as Manager, active', () => {",
+            "    const u = pm.response.json().data;",
+            "    pm.expect(u.role).to.eql('Manager');",
+            "    pm.expect(u.is_active).to.be.true;",
+            "});",
+        ]),
+    req("New manager can log in → manager_token", "POST", "auth/login",
+        no_auth=True,
+        body={"identity": "{{mgr_email}}", "password": "Manager123!"},
+        description="Stores {{manager_token}} used by the Access Control "
+                    "matrix below.",
+        tests=status_tests(200, True) + [
+            "pm.collectionVariables.set('manager_token', "
+            "pm.response.json().data.token);",
+        ]),
+    req("Get user", "GET", "users/{{staff_user_id}}",
+        tests=status_tests(200, True)),
+    req("Update user (rename)", "PUT", "users/{{staff_user_id}}",
+        body={"name": "Postman Manager (edited)"},
+        tests=status_tests(200, True)),
+    req("Duplicate email (422)", "POST", "users",
+        body={"name": "Dup", "email": "{{mgr_email}}",
+              "password": "Manager123!", "role_id": "{{manager_role_id}}"},
+        tests=status_tests(422, False) + error_code_test("EMAIL_TAKEN")),
+    req("Weak password (422)", "POST", "users",
+        body={"name": "Weak", "email": "weak_{{$timestamp}}@demo.test",
+              "password": "12", "role_id": "{{manager_role_id}}"},
+        tests=status_tests(422, False) + error_code_test("WEAK_PASSWORD")),
+    req("No email or phone (422)", "POST", "users",
+        body={"name": "NoId", "password": "Manager123!",
+              "role_id": "{{manager_role_id}}"},
+        tests=status_tests(422, False) + error_code_test("IDENTITY_REQUIRED")),
+    req("Invalid role (422)", "POST", "users",
+        body={"name": "BadRole", "email": "badrole_{{$timestamp}}@demo.test",
+              "password": "Manager123!", "role_id": 999999},
+        tests=status_tests(422, False) + error_code_test("ROLE_NOT_FOUND")),
+    req("Cannot deactivate self (422)", "POST",
+        "users/{{own_user_id}}/active",
+        body={"is_active": False},
+        description="The acting user can't lock themselves out.",
+        tests=status_tests(422, False) +
+              error_code_test("CANNOT_DEACTIVATE_SELF")),
+    req("Cashier cannot list users → 403", "GET", "users",
+        auth_token="{{cashier_token}}",
+        tests=status_tests(403, False) + error_code_test("FORBIDDEN")),
+    req("Cashier cannot create user → 403", "POST", "users",
+        auth_token="{{cashier_token}}",
+        body={"name": "X", "email": "x@demo.test", "password": "Manager123!",
+              "role_id": "{{cashier_role_id}}"},
+        tests=status_tests(403, False) + error_code_test("FORBIDDEN")),
+])
+
+def matrix(name, method, path, owner, manager, cashier, body=None):
+    """Three requests (owner/manager/cashier) asserting the expected code."""
+    def one(label, token, expected):
+        ok = 200 <= expected < 300
+        return req(f"{name} · {label} → {expected}", method, path,
+                   auth_token=token, body=body,
+                   tests=[f"pm.test('{label} gets {expected}', () => "
+                          f"pm.response.to.have.status({expected}));"] +
+                         ([] if ok else
+                          ["pm.test('403 is FORBIDDEN', () => "
+                           "pm.expect(pm.response.json().error.code)"
+                           ".to.eql('FORBIDDEN'));"] if expected == 403 else []))
+    return [one("Owner", "{{token}}", owner),
+            one("Manager", "{{manager_token}}", manager),
+            one("Cashier", "{{cashier_token}}", cashier)]
+
+access_control = folder("Access Control (RBAC matrix)", (
+    "The heart of RBAC: the SAME endpoint hit by Owner, Manager and "
+    "Cashier, asserting exactly who reaches the handler (2xx / 422 = "
+    "allowed) and who is blocked (403 FORBIDDEN). Reflects the seeded "
+    "grants — Cashier = POS essentials, Manager = operational finance "
+    "(no accounting.manage / users / settings / period close), Owner = "
+    "everything. Run the Users folder first for {{manager_token}}. "
+    "(POST bodies are intentionally empty: an allowed role reaches "
+    "validation — 422 — while a blocked role is stopped at 403.)"
 ), [
     req("No token → 401", "GET", "products", no_auth=True,
         tests=status_tests(401, False)),
     req("Garbage token → 401", "GET", "products",
         auth_token="not-a-real-token",
         tests=status_tests(401, False) + error_code_test("TOKEN_INVALID")),
-    req("Cashier lists products → 200", "GET", "products",
-        auth_token="{{cashier_token}}",
-        description="Cashier HAS products.view.",
-        tests=status_tests(200, True)),
-    req("Cashier creates product → 403", "POST", "products",
-        auth_token="{{cashier_token}}",
-        body={"name": "Should fail"},
-        tests=status_tests(403, False) + error_code_test("FORBIDDEN")),
-    req("Cashier creates supplier bill → 403", "POST", "supplier-bills",
-        auth_token="{{cashier_token}}", body={},
-        tests=status_tests(403, False) + error_code_test("FORBIDDEN")),
-    req("Cashier lists bank accounts → 403", "GET", "bank-accounts",
-        auth_token="{{cashier_token}}",
-        tests=status_tests(403, False) + error_code_test("FORBIDDEN")),
-    req("Cashier reads customer invoices → 200", "GET", "customer-invoices",
-        auth_token="{{cashier_token}}",
-        description="Cashier HAS invoices.view (counter lookups).",
-        tests=status_tests(200, True)),
+    *matrix("View products", "GET", "products", 200, 200, 200),
+    *matrix("Create product", "POST", "products", 422, 422, 403, body={}),
+    *matrix("View stock", "GET", "stock", 200, 200, 200),
+    *matrix("Read customer invoices", "GET", "customer-invoices",
+            200, 200, 200),
+    *matrix("Create supplier bill", "POST", "supplier-bills",
+            422, 422, 403, body={}),
+    *matrix("View bank accounts", "GET", "bank-accounts", 200, 200, 403),
+    *matrix("View chart of accounts", "GET", "accounts", 200, 200, 403),
+    *matrix("Post manual journal (accounting.manage)", "POST",
+            "journal-entries", 422, 403, 403, body={}),
+    *matrix("Advanced sales report", "GET", "reports/sales", 200, 200, 403),
+    *matrix("List users (users.manage)", "GET", "users", 200, 403, 403),
+    *matrix("Audit log (settings.manage)", "GET", "audit-log",
+            200, 403, 403),
+    *matrix("Create period (periods.manage)", "POST", "financial-periods",
+            422, 403, 403, body={}),
 ])
 
 cleanup = folder("Cleanup", (
@@ -754,7 +916,10 @@ collection = {
         var("invoice_id"), var("deposit_id"), var("bill_id"),
         var("period_id"), var("bank_account_id"), var("budget_id"),
         var("journal_id"), var("rent_account_id"), var("cash_account_id"),
-        var("stock_value_before"),
+        var("stock_value_before"), var("book_value_before"),
+        var("own_user_id"), var("manager_role_id"), var("cashier_role_id"),
+        var("owner_role_id"), var("role_id"), var("role_name"),
+        var("staff_user_id"), var("mgr_email"), var("manager_token"),
     ],
     "item": [
         authentication, dashboard, categories, products, inventory,
@@ -762,7 +927,7 @@ collection = {
         customer_invoices, customer_receipts, customer_deposits,
         supplier_bills, supplier_payments,
         reports, chart_of_accounts, journal, periods, banks, budgets,
-        access_control, cleanup, system_health,
+        roles, users, access_control, cleanup, system_health,
     ],
 }
 

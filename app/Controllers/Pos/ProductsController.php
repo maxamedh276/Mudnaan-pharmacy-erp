@@ -137,6 +137,23 @@ class ProductsController extends BaseApiController
             return $this->respondNotFound('Product');
         }
 
+        // Any stock still on hand is written off first, so deleting a
+        // product never leaves its value stranded in the Inventory
+        // account — stock value and the books stay reconciled.
+        $branchId = $this->branchId();
+        $onHand   = (new InventoryService())->currentQuantity($branchId, $productId);
+
+        if ($onHand > 0) {
+            (new InventoryService())->adjustStock(
+                $branchId,
+                $productId,
+                -$onHand,
+                'Written off on product deletion',
+                AuthContext::userId(),
+                (string) AuthContext::plan(),
+            );
+        }
+
         $productModel->delete($productId);
 
         return $this->respondData(['message' => 'Product deleted.']);
