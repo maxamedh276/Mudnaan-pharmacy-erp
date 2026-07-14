@@ -202,6 +202,274 @@ class ReportService
         ];
     }
 
+    // ================================================================
+    //  SALES REPORTS
+    // ================================================================
+
+    /** Sales grouped by customer over a period. */
+    public function salesByCustomer(int $branchId, string $from, string $to): array
+    {
+        return $this->groupedSales($branchId, $from, $to,
+            "COALESCE(c.name, 'Walk-in Customer') AS label",
+            'LEFT JOIN customers c ON c.id = s.customer_id',
+            'label');
+    }
+
+    /** Sales grouped by product (also drives most/least sold). */
+    public function salesByProduct(int $branchId, string $from, string $to, string $order = 'DESC'): array
+    {
+        $rows = db_connect()->query(
+            "SELECT si.description AS label,
+                    SUM(si.quantity) AS quantity, SUM(si.line_total) AS total
+             FROM sale_items si
+             JOIN sales s ON s.id = si.sale_id
+             WHERE s.branch_id = ? AND s.status IN ('completed','partial')
+               AND s.sold_at >= ? AND s.sold_at < ? + INTERVAL 1 DAY
+             GROUP BY si.product_id, si.description
+             ORDER BY quantity " . ($order === 'ASC' ? 'ASC' : 'DESC'),
+            [$branchId, $from, $to],
+        )->getResultArray();
+
+        foreach ($rows as &$row) {
+            $row['quantity'] = (float) $row['quantity'];
+            $row['total']    = (float) $row['total'];
+        }
+
+        return ['period' => ['from' => $from, 'to' => $to], 'rows' => $rows];
+    }
+
+    /** Sales grouped by category over a period. */
+    public function salesByCategory(int $branchId, string $from, string $to): array
+    {
+        $rows = db_connect()->query(
+            "SELECT COALESCE(cat.name, 'Uncategorized') AS label,
+                    SUM(si.quantity) AS quantity, SUM(si.line_total) AS total
+             FROM sale_items si
+             JOIN sales s ON s.id = si.sale_id
+             LEFT JOIN products p ON p.id = si.product_id
+             LEFT JOIN categories cat ON cat.id = p.category_id
+             WHERE s.branch_id = ? AND s.status IN ('completed','partial')
+               AND s.sold_at >= ? AND s.sold_at < ? + INTERVAL 1 DAY
+             GROUP BY cat.name
+             ORDER BY total DESC",
+            [$branchId, $from, $to],
+        )->getResultArray();
+
+        foreach ($rows as &$row) {
+            $row['quantity'] = (float) $row['quantity'];
+            $row['total']    = (float) $row['total'];
+        }
+
+        return ['period' => ['from' => $from, 'to' => $to], 'rows' => $rows];
+    }
+
+    // ================================================================
+    //  INVENTORY REPORTS
+    // ================================================================
+
+    /** Stock valuation: every product's on-hand qty × cost + sell value. */
+    public function stockValuation(int $branchId): array
+    {
+        $rows = db_connect()->query(
+            "SELECT p.name, sl.quantity,
+                    p.cost_price, p.sell_price,
+                    (sl.quantity * p.cost_price) AS cost_value,
+                    (sl.quantity * p.sell_price) AS retail_value
+             FROM stock_levels sl
+             JOIN products p ON p.id = sl.product_id AND p.deleted_at IS NULL
+             WHERE sl.branch_id = ?
+             ORDER BY cost_value DESC",
+            [$branchId],
+        )->getResultArray();
+
+        $totalCost = 0.0;
+        $totalRetail = 0.0;
+        foreach ($rows as &$row) {
+            $row['quantity']     = (float) $row['quantity'];
+            $row['cost_price']   = (float) $row['cost_price'];
+            $row['sell_price']   = (float) $row['sell_price'];
+            $row['cost_value']   = round((float) $row['cost_value'], 2);
+            $row['retail_value'] = round((float) $row['retail_value'], 2);
+            $totalCost   += $row['cost_value'];
+            $totalRetail += $row['retail_value'];
+        }
+
+        return [
+            'rows'         => $rows,
+            'total_cost'   => round($totalCost, 2),
+            'total_retail' => round($totalRetail, 2),
+        ];
+    }
+
+    /** Stock movement ledger over a period. */
+    public function stockMovement(int $branchId, string $from, string $to): array
+    {
+        $rows = db_connect()->query(
+            "SELECT m.created_at, p.name AS product, m.qty_change, m.reason,
+                    m.ref_type, u.name AS user_name
+             FROM stock_movements m
+             JOIN products p ON p.id = m.product_id
+             LEFT JOIN users u ON u.id = m.user_id
+             WHERE m.branch_id = ? AND m.created_at >= ? AND m.created_at < ? + INTERVAL 1 DAY
+             ORDER BY m.id DESC",
+            [$branchId, $from, $to],
+        )->getResultArray();
+
+        foreach ($rows as &$row) {
+            $row['qty_change'] = (float) $row['qty_change'];
+        }
+
+        return ['period' => ['from' => $from, 'to' => $to], 'rows' => $rows];
+    }
+
+    // ================================================================
+    //  CUSTOMER / SUPPLIER REPORTS
+    // ================================================================
+
+    /** Customer balances (owed positive). */
+    public function customerBalances(): array
+    {
+        $rows = db_connect()->query(
+            "SELECT name, phone, -balance AS owed
+             FROM customers WHERE deleted_at IS NULL
+             ORDER BY owed DESC",
+        )->getResultArray();
+
+        foreach ($rows as &$row) {
+            $row['owed'] = round((float) $row['owed'], 2);
+        }
+
+        return ['rows' => $rows];
+    }
+
+    /** Aging of unpaid customer invoices bucketed by age. */
+    public function customerAging(int $branchId): array
+    {
+        return $this->aging('customer_invoices', 'customer_id', 'customers', 'invoice_date', $branchId);
+    }
+
+    /** Top customers by sales value over a period. */
+    public function topCustomers(int $branchId, string $from, string $to): array
+    {
+        return $this->groupedSales($branchId, $from, $to,
+            "COALESCE(c.name, 'Walk-in Customer') AS label",
+            'LEFT JOIN customers c ON c.id = s.customer_id',
+            'label', limit: 10);
+    }
+
+    /** Supplier balances (payable positive). */
+    public function supplierBalances(int $branchId): array
+    {
+        $rows = db_connect()->query(
+            "SELECT s.name, s.phone,
+                    COALESCE(SUM(b.total - b.paid_total), 0) AS payable
+             FROM suppliers s
+             LEFT JOIN supplier_bills b ON b.supplier_id = s.id
+                  AND b.branch_id = ? AND b.deleted_at IS NULL AND b.status != 'cancelled'
+             WHERE s.deleted_at IS NULL
+             GROUP BY s.id, s.name, s.phone
+             HAVING payable <> 0
+             ORDER BY payable DESC",
+            [$branchId],
+        )->getResultArray();
+
+        foreach ($rows as &$row) {
+            $row['payable'] = round((float) $row['payable'], 2);
+        }
+
+        return ['rows' => $rows];
+    }
+
+    /** Aging of unpaid supplier bills bucketed by age. */
+    public function supplierAging(int $branchId): array
+    {
+        return $this->aging('supplier_bills', 'supplier_id', 'suppliers', 'bill_date', $branchId);
+    }
+
+    /** Top suppliers by purchase value over a period. */
+    public function topSuppliers(int $branchId, string $from, string $to): array
+    {
+        $rows = db_connect()->query(
+            "SELECT sup.name AS label, COALESCE(SUM(p.total), 0) AS total
+             FROM purchases p
+             JOIN suppliers sup ON sup.id = p.supplier_id
+             WHERE p.branch_id = ? AND p.status != 'cancelled'
+               AND p.purchased_at >= ? AND p.purchased_at < ? + INTERVAL 1 DAY
+             GROUP BY sup.id, sup.name
+             ORDER BY total DESC
+             LIMIT 10",
+            [$branchId, $from, $to],
+        )->getResultArray();
+
+        foreach ($rows as &$row) {
+            $row['total'] = (float) $row['total'];
+        }
+
+        return ['period' => ['from' => $from, 'to' => $to], 'rows' => $rows];
+    }
+
+    private function groupedSales(
+        int $branchId,
+        string $from,
+        string $to,
+        string $labelExpr,
+        string $join,
+        string $groupBy,
+        int $limit = 0,
+    ): array {
+        $limitClause = $limit > 0 ? ' LIMIT ' . $limit : '';
+
+        $rows = db_connect()->query(
+            "SELECT $labelExpr, COUNT(*) AS transactions,
+                    COALESCE(SUM(s.grand_total), 0) AS total
+             FROM sales s
+             $join
+             WHERE s.branch_id = ? AND s.status IN ('completed','partial')
+               AND s.sold_at >= ? AND s.sold_at < ? + INTERVAL 1 DAY
+             GROUP BY $groupBy
+             ORDER BY total DESC" . $limitClause,
+            [$branchId, $from, $to],
+        )->getResultArray();
+
+        foreach ($rows as &$row) {
+            $row['transactions'] = (int) $row['transactions'];
+            $row['total']        = (float) $row['total'];
+        }
+
+        return ['period' => ['from' => $from, 'to' => $to], 'rows' => $rows];
+    }
+
+    /**
+     * Shared aging bucketer for receivable/payable documents.
+     */
+    private function aging(string $table, string $partyKey, string $partyTable, string $dateCol, int $branchId): array
+    {
+        $rows = db_connect()->query(
+            "SELECT party.name AS label,
+                    SUM(CASE WHEN DATEDIFF(CURDATE(), d.$dateCol) <= 30 THEN d.total - d.paid_total ELSE 0 END) AS b0,
+                    SUM(CASE WHEN DATEDIFF(CURDATE(), d.$dateCol) BETWEEN 31 AND 60 THEN d.total - d.paid_total ELSE 0 END) AS b30,
+                    SUM(CASE WHEN DATEDIFF(CURDATE(), d.$dateCol) BETWEEN 61 AND 90 THEN d.total - d.paid_total ELSE 0 END) AS b60,
+                    SUM(CASE WHEN DATEDIFF(CURDATE(), d.$dateCol) > 90 THEN d.total - d.paid_total ELSE 0 END) AS b90,
+                    SUM(d.total - d.paid_total) AS total
+             FROM $table d
+             JOIN $partyTable party ON party.id = d.$partyKey
+             WHERE d.branch_id = ? AND d.deleted_at IS NULL
+               AND d.status IN ('unpaid','partial')
+             GROUP BY party.id, party.name
+             HAVING total > 0
+             ORDER BY total DESC",
+            [$branchId],
+        )->getResultArray();
+
+        foreach ($rows as &$row) {
+            foreach (['b0', 'b30', 'b60', 'b90', 'total'] as $key) {
+                $row[$key] = round((float) $row[$key], 2);
+            }
+        }
+
+        return ['buckets' => ['0-30', '31-60', '61-90', '90+'], 'rows' => $rows];
+    }
+
     private function salesByDay(int $branchId, string $dateFrom, string $dateTo): array
     {
         $rows = db_connect()->query(

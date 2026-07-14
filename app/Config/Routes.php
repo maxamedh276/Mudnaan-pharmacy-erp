@@ -90,6 +90,29 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers'], static function (Ro
         $routes->group('', ['filter' => 'plan:premium'], static function (RouteCollection $routes) {
             $routes->get('reports/sales', 'Reports\ReportsController::sales');
             $routes->get('reports/inventory', 'Reports\ReportsController::inventory');
+            // Financial statements
+            $routes->get('reports/trial-balance', 'Reports\ReportsController::trialBalance');
+            $routes->get('reports/income-statement', 'Reports\ReportsController::incomeStatement');
+            $routes->get('reports/balance-sheet', 'Reports\ReportsController::balanceSheet');
+            $routes->get('reports/cash-flow', 'Reports\ReportsController::cashFlow');
+            $routes->get('reports/general-ledger', 'Reports\ReportsController::generalLedger');
+            $routes->get('reports/account-ledger/(:num)', 'Reports\ReportsController::accountLedger/$1');
+            // Sales
+            $routes->get('reports/sales-by-customer', 'Reports\ReportsController::salesByCustomer');
+            $routes->get('reports/sales-by-product', 'Reports\ReportsController::salesByProduct');
+            $routes->get('reports/sales-by-category', 'Reports\ReportsController::salesByCategory');
+            $routes->get('reports/most-sold', 'Reports\ReportsController::mostSold');
+            $routes->get('reports/least-sold', 'Reports\ReportsController::leastSold');
+            // Inventory
+            $routes->get('reports/stock-valuation', 'Reports\ReportsController::stockValuation');
+            $routes->get('reports/stock-movement', 'Reports\ReportsController::stockMovement');
+            // Customer / supplier
+            $routes->get('reports/customer-balances', 'Reports\ReportsController::customerBalances');
+            $routes->get('reports/customer-aging', 'Reports\ReportsController::customerAging');
+            $routes->get('reports/top-customers', 'Reports\ReportsController::topCustomers');
+            $routes->get('reports/supplier-balances', 'Reports\ReportsController::supplierBalances');
+            $routes->get('reports/supplier-aging', 'Reports\ReportsController::supplierAging');
+            $routes->get('reports/top-suppliers', 'Reports\ReportsController::topSuppliers');
             $routes->get('accounts', 'Accounting\AccountsController::index');
             $routes->get('account-groups', 'Accounting\AccountsController::groups');
             $routes->post('accounts', 'Accounting\AccountsController::create');
@@ -115,6 +138,10 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers'], static function (Ro
             $routes->get('budgets', 'Accounting\BudgetsController::index');
             $routes->post('budgets', 'Accounting\BudgetsController::create');
             $routes->get('budgets/(:num)', 'Accounting\BudgetsController::show/$1');
+
+            // Audit trail
+            $routes->get('audit-log', 'Admin\AuditLogController::index');
+            $routes->get('audit-log/filters', 'Admin\AuditLogController::filters');
         });
     });
 });
