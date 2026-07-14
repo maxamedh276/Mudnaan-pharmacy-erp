@@ -115,7 +115,8 @@ class PayablesService
                       supplier_payments.supplier_id, suppliers.name AS supplier_name,
                       supplier_payments.bill_id, supplier_bills.bill_no,
                       supplier_payments.method, supplier_payments.amount,
-                      supplier_payments.reference, supplier_payments.paid_at')
+                      supplier_payments.reference, supplier_payments.status,
+                      supplier_payments.paid_at')
             ->join('suppliers', 'suppliers.id = supplier_payments.supplier_id')
             ->join('supplier_bills', 'supplier_bills.id = supplier_payments.bill_id', 'left')
             ->where('supplier_payments.branch_id', $branchId);

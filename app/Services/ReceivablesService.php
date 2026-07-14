@@ -125,7 +125,8 @@ class ReceivablesService
                       customer_receipts.customer_id, customers.name AS customer_name,
                       customer_receipts.invoice_id, customer_invoices.invoice_no,
                       customer_receipts.method, customer_receipts.amount,
-                      customer_receipts.reference, customer_receipts.received_at')
+                      customer_receipts.reference, customer_receipts.status,
+                      customer_receipts.received_at')
             ->join('customers', 'customers.id = customer_receipts.customer_id')
             ->join('customer_invoices', 'customer_invoices.id = customer_receipts.invoice_id', 'left')
             ->where('customer_receipts.branch_id', $branchId);
