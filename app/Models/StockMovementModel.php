@@ -23,7 +23,8 @@ class StockMovementModel extends Model
                       products.name AS product_name, stock_movements.qty_change,
                       stock_movements.reason, stock_movements.ref_type,
                       stock_movements.ref_id, users.name AS user_name,
-                      stock_movements.created_at')
+                      stock_movements.created_at,
+                      ABS(stock_movements.qty_change) * products.cost_price AS cost_value')
             ->join('products', 'products.id = stock_movements.product_id')
             ->join('users', 'users.id = stock_movements.user_id', 'left')
             ->where('stock_movements.branch_id', $branchId);
@@ -43,6 +44,7 @@ class StockMovementModel extends Model
             $row['product_id'] = (int) $row['product_id'];
             $row['ref_id']     = $row['ref_id'] === null ? null : (int) $row['ref_id'];
             $row['qty_change'] = (float) $row['qty_change'];
+            $row['cost_value'] = round((float) $row['cost_value'], 2);
         }
 
         return ['items' => $rows, 'total' => $total];

@@ -65,11 +65,14 @@ class ProductsController extends BaseApiController
         $productId    = $productModel->insert($this->productFields($body));
 
         // Optional opening stock so a new product is sellable immediately.
+        // Booked to the ledger AND the books (Inventory / Owner's Capital).
         $openingQuantity = (float) ($body['opening_stock'] ?? 0);
 
         if ($openingQuantity > 0) {
+            $branchId = $this->branchId();
+
             (new InventoryService())->recordMovement(
-                $this->branchId(),
+                $branchId,
                 (int) $productId,
                 $openingQuantity,
                 'opening',
@@ -77,6 +80,16 @@ class ProductsController extends BaseApiController
                 null,
                 AuthContext::userId(),
             );
+
+            if (AuthContext::isPremium()) {
+                $openingValue = round($openingQuantity * (float) ($body['cost_price'] ?? 0), 2);
+                (new \App\Services\AccountingService())->postOpeningStock(
+                    $branchId,
+                    $openingValue,
+                    (int) $productId,
+                    AuthContext::userId(),
+                );
+            }
         }
 
         return $this->respondData(

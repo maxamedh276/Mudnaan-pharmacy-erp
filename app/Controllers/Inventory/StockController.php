@@ -6,8 +6,10 @@ use App\Controllers\BaseApiController;
 use App\Libraries\AuthContext;
 use App\Models\ProductModel;
 use App\Models\StockMovementModel;
+use App\Services\AccountingService;
 use App\Services\InventoryService;
 use CodeIgniter\HTTP\ResponseInterface;
+use InvalidArgumentException;
 
 class StockController extends BaseApiController
 {
@@ -47,6 +49,9 @@ class StockController extends BaseApiController
                 'summary' => [
                     'total_units'  => (float) $summaryRow['total_units'],
                     'stock_value'  => (float) $summaryRow['stock_value'],
+                    // What the Inventory account says the stock is worth on
+                    // the books (Premium); should track stock_value.
+                    'book_value'   => $this->inventoryBookValue($branchId),
                     'low_stock'    => (int) $summaryRow['low_stock'],
                     'out_of_stock' => (int) $summaryRow['out_of_stock'],
                 ],
@@ -55,6 +60,25 @@ class StockController extends BaseApiController
             200,
             $this->paginationMeta($page, $perPage, $result['total']),
         );
+    }
+
+    /** The Inventory (1200) account balance, or null for Basic tenants. */
+    private function inventoryBookValue(int $branchId): ?float
+    {
+        if (! AuthContext::isPremium()) {
+            return null;
+        }
+
+        $row = db_connect()->query(
+            "SELECT COALESCE(SUM(l.debit - l.credit), 0) AS balance
+             FROM journal_entry_lines l
+             JOIN journal_entries e ON e.id = l.journal_entry_id AND e.status = 'posted'
+             JOIN accounts a ON a.id = l.account_id
+             WHERE a.code = ? AND l.branch_id = ?",
+            [AccountingService::INVENTORY, $branchId],
+        )->getRowArray();
+
+        return round((float) $row['balance'], 2);
     }
 
     /**
@@ -86,6 +110,10 @@ class StockController extends BaseApiController
     /**
      * POST /api/v1/stock/adjustments — the Stock Adjustment screen.
      * Body: { product_id, qty_change (+in / -out), note? }
+     *
+     * Writes the stock ledger row AND posts the value to the books
+     * (Inventory <-> Inventory Adjustment) so stock and accounting stay
+     * in step. Returns the updated product plus the value moved.
      */
     public function adjust(): ResponseInterface
     {
@@ -104,36 +132,27 @@ class StockController extends BaseApiController
             ]);
         }
 
-        $productModel = new ProductModel();
-
-        if ($productModel->find($productId) === null) {
-            return $this->respondNotFound('Product');
-        }
-
-        $branchId  = $this->branchId();
-        $inventory = new InventoryService();
-
-        if ($qtyChange < 0 && $inventory->currentQuantity($branchId, $productId) + $qtyChange < 0) {
-            return $this->respondError(
-                'INSUFFICIENT_STOCK',
-                'The adjustment would make the stock negative.',
-                422,
+        try {
+            $result = (new InventoryService())->adjustStock(
+                $this->branchId(),
+                $productId,
+                $qtyChange,
+                $body['note'] ?? null,
+                AuthContext::userId(),
+                (string) AuthContext::plan(),
             );
+        } catch (InvalidArgumentException $exception) {
+            return match ($exception->getMessage()) {
+                'PRODUCT_NOT_FOUND'  => $this->respondNotFound('Product'),
+                'INSUFFICIENT_STOCK' => $this->respondError(
+                    'INSUFFICIENT_STOCK',
+                    'The adjustment would make the stock negative.',
+                    422,
+                ),
+                default => $this->respondError('ADJUSTMENT_FAILED', $exception->getMessage(), 422),
+            };
         }
 
-        $inventory->recordMovement(
-            $branchId,
-            $productId,
-            $qtyChange,
-            'adjustment',
-            'adjustment',
-            null,
-            AuthContext::userId(),
-        );
-
-        return $this->respondData(
-            $productModel->findWithStock($productId, $branchId),
-            201,
-        );
+        return $this->respondData($result, 201);
     }
 }

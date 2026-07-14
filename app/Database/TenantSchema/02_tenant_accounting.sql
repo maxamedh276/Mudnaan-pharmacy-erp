@@ -256,6 +256,8 @@ INSERT INTO accounts (account_group_id, code, name, is_system)
 -- Cost of Sales
 INSERT INTO accounts (account_group_id, code, name, is_system)
   SELECT id, '5000', 'Cost of Goods Sold',    1 FROM account_groups WHERE code='COS';
+INSERT INTO accounts (account_group_id, code, name, is_system)
+  SELECT id, '5100', 'Inventory Adjustment',  1 FROM account_groups WHERE code='COS';
 -- Operating Expenses
 INSERT INTO accounts (account_group_id, code, name, is_system)
   SELECT id, '6000', 'Salaries Expense',      1 FROM account_groups WHERE code='OPEX';

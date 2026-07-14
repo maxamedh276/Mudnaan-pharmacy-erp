@@ -306,7 +306,8 @@ class ReportService
     {
         $rows = db_connect()->query(
             "SELECT m.created_at, p.name AS product, m.qty_change, m.reason,
-                    m.ref_type, u.name AS user_name
+                    m.ref_type, u.name AS user_name,
+                    ABS(m.qty_change) * p.cost_price AS cost_value
              FROM stock_movements m
              JOIN products p ON p.id = m.product_id
              LEFT JOIN users u ON u.id = m.user_id
@@ -317,6 +318,7 @@ class ReportService
 
         foreach ($rows as &$row) {
             $row['qty_change'] = (float) $row['qty_change'];
+            $row['cost_value'] = round((float) $row['cost_value'], 2);
         }
 
         return ['period' => ['from' => $from, 'to' => $to], 'rows' => $rows];

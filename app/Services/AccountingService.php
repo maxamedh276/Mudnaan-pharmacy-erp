@@ -64,6 +64,69 @@ class AccountingService
         );
     }
 
+    public const INVENTORY_ADJ = '5100';
+
+    /**
+     * A manual stock adjustment at cost value:
+     *   stock UP   : DEBIT Inventory / CREDIT Inventory Adjustment (a gain)
+     *   stock DOWN : DEBIT Inventory Adjustment / CREDIT Inventory (a loss)
+     */
+    public function postInventoryAdjustment(
+        int $branchId,
+        float $value,
+        bool $increase,
+        int $productId,
+        ?int $userId,
+    ): void {
+        if ($value <= 0) {
+            return;
+        }
+
+        $lines = $increase
+            ? [
+                ['code' => self::INVENTORY,     'debit'  => $value],
+                ['code' => self::INVENTORY_ADJ, 'credit' => $value],
+            ]
+            : [
+                ['code' => self::INVENTORY_ADJ, 'debit'  => $value],
+                ['code' => self::INVENTORY,     'credit' => $value],
+            ];
+
+        $this->createEntry(
+            branchId: $branchId,
+            entryDate: date('Y-m-d'),
+            description: 'Stock adjustment (product #' . $productId . ')',
+            sourceType: 'stock_adjustment',
+            sourceId: $productId,
+            lines: $lines,
+            userId: $userId,
+        );
+    }
+
+    /**
+     * Opening stock booked when a product is created with a quantity:
+     *   DEBIT Inventory / CREDIT Owner's Capital, valued at cost.
+     */
+    public function postOpeningStock(int $branchId, float $value, int $productId, ?int $userId): void
+    {
+        if ($value <= 0) {
+            return;
+        }
+
+        $this->createEntry(
+            branchId: $branchId,
+            entryDate: date('Y-m-d'),
+            description: 'Opening stock (product #' . $productId . ')',
+            sourceType: 'opening_stock',
+            sourceId: $productId,
+            lines: [
+                ['code' => self::INVENTORY,      'debit'  => $value],
+                ['code' => self::OWNERS_CAPITAL, 'credit' => $value],
+            ],
+            userId: $userId,
+        );
+    }
+
     /**
      * A received purchase: DEBIT Inventory / CREDIT Cash (paid) +
      * Accounts Payable (owed).
