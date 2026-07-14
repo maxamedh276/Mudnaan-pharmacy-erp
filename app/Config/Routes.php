@@ -91,6 +91,11 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers'], static function (Ro
             $routes->get('reports/sales', 'Reports\ReportsController::sales');
             $routes->get('reports/inventory', 'Reports\ReportsController::inventory');
             $routes->get('accounts', 'Accounting\AccountsController::index');
+            $routes->get('account-groups', 'Accounting\AccountsController::groups');
+            $routes->post('accounts', 'Accounting\AccountsController::create');
+            $routes->put('accounts/(:num)', 'Accounting\AccountsController::update/$1');
+            $routes->post('accounts/(:num)/active', 'Accounting\AccountsController::deactivate/$1');
+            $routes->delete('accounts/(:num)', 'Accounting\AccountsController::delete/$1');
             $routes->get('journal-entries', 'Accounting\JournalController::index');
             $routes->post('journal-entries', 'Accounting\JournalController::create');
             $routes->get('journal-entries/(:num)', 'Accounting\JournalController::show/$1');
