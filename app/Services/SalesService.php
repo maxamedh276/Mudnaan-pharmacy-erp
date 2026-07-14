@@ -43,7 +43,13 @@ class SalesService
             throw new InvalidArgumentException('EMPTY_SALE');
         }
 
-        $uuid = $data['uuid'] ?? Uuid::v4();
+        // A client uuid must be a proper 36-char UUID; anything else is
+        // ignored (generate our own) so a malformed value can never
+        // truncate into the CHAR(36) column and break idempotency.
+        $uuid = $data['uuid'] ?? null;
+        if ($uuid === null || ! preg_match('/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/', (string) $uuid)) {
+            $uuid = Uuid::v4();
+        }
 
         // Offline-sync safety: the same device-generated uuid can never
         // create two sales. Return the existing one instead of failing.
@@ -67,8 +73,50 @@ class SalesService
         }
 
         $database = db_connect();
-        $database->transException(true)->transStart();
 
+        try {
+            $database->transException(true)->transStart();
+
+            $saleId = $this->persistSale(
+                $database, $uuid, $data, $branchId, $userId, $plan,
+                $lineRows, $subtotal, $taxTotal, $costOfGoods, $saleDiscount,
+                $grandTotal, $payments, $paidTotal,
+            );
+
+            $database->transComplete();
+        } catch (\CodeIgniter\Database\Exceptions\DatabaseException $exception) {
+            // Concurrent double-submit of the same uuid: the losing
+            // request returns the sale the winner just created.
+            $winner = $this->sales->where('uuid', $uuid)->first();
+            if ($winner !== null) {
+                return $this->sales->findDetailed((int) $winner['id'], $branchId);
+            }
+            throw $exception;
+        }
+
+        return $this->sales->findDetailed($saleId, $branchId);
+    }
+
+    /**
+     * The transactional body of a sale: header + items + payments +
+     * stock ledger + customer balance/invoice + accounting posting.
+     */
+    private function persistSale(
+        $database,
+        string $uuid,
+        array $data,
+        int $branchId,
+        int $userId,
+        string $plan,
+        array $lineRows,
+        float $subtotal,
+        float $taxTotal,
+        float $costOfGoods,
+        float $saleDiscount,
+        float $grandTotal,
+        array $payments,
+        float $paidTotal,
+    ): int {
         $saleId = (int) $this->sales->insert([
             'uuid'        => $uuid,
             'branch_id'   => $branchId,
@@ -131,9 +179,7 @@ class SalesService
             $this->accounting->postSale($sale, $costOfGoods, $branchId, $userId);
         }
 
-        $database->transComplete();
-
-        return $this->sales->findDetailed($saleId, $branchId);
+        return $saleId;
     }
 
     /**
