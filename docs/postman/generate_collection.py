@@ -334,6 +334,19 @@ customers = folder("Customers", (
     req("Update customer", "PUT", "customers/{{customer_id}}",
         body={"address": "Hodan District, Mogadishu"},
         tests=status_tests(200, True)),
+    req("Customer statement (running balance)", "GET",
+        "customers/{{customer_id}}/statement",
+        description="Full transaction ledger (sales, invoices, receipts, "
+                    "deposits) with a running balance + summary. Supports "
+                    "?date_from=&date_to=&type=&q=.",
+        tests=status_tests(200, True) + [
+            "pm.test('Statement has entries + summary', () => {",
+            "    const d = pm.response.json().data;",
+            "    pm.expect(d).to.have.property('summary');",
+            "    pm.expect(d).to.have.property('entries');",
+            "    pm.expect(d.summary).to.have.property('closing_balance');",
+            "});",
+        ]),
 ])
 
 suppliers = folder("Suppliers", (
@@ -378,30 +391,76 @@ purchases = folder("Purchases", (
 ])
 
 sales = folder("Sales / POS", (
-    "The POS flow. Totals are always recomputed server-side; a client uuid "
-    "makes creation idempotent (offline-ready); credit sales require a "
-    "customer and auto-create a customer invoice. "
-    "Permissions: sales.view / sales.create."
+    "The POS flow, covering the real-life scenarios. Totals are recomputed "
+    "server-side; a proper uuid makes checkout idempotent (safe against "
+    "double-taps / offline retries); every sale decrements stock through "
+    "the ledger and posts COGS/Inventory; credit sales require a customer "
+    "and auto-create an invoice. Permissions: sales.view / sales.create."
 ), [
     req("List sales", "GET", "sales", query="page=1&per_page=10",
         tests=status_tests(200, True)),
     req("Filter sales by status", "GET", "sales", query="status=partial",
         tests=status_tests(200, True)),
-    req("Create cash sale", "POST", "sales",
+    # ---- inventory effect ----
+    req("Stock BEFORE sale (snapshot)", "GET", "products/{{product_id}}",
+        description="Stores {{qty_before}} so the next request can prove "
+                    "the sale decremented stock by exactly the quantity sold.",
+        tests=status_tests(200, True) + [
+            "pm.collectionVariables.set('qty_before', "
+            "pm.response.json().data.quantity);",
+        ]),
+    req("Create cash sale (decrements stock)", "POST", "sales",
         body={"items": [{"product_id": "{{product_id}}", "quantity": 2}],
               "payments": [{"method": "cash", "amount": 2.20}]},
-        description="2 × 1.10 = 2.20 fully paid → status completed. "
-                    "Stock -2. Premium: auto journal entry. Stores {{sale_id}}.",
+        description="2 units fully paid → completed. Stores {{sale_id}}.",
         tests=status_tests(201, True) + capture("sale_id") + [
             "pm.test('Sale completed', () => "
             "pm.expect(pm.response.json().data.status).to.eql('completed'));",
+        ]),
+    req("Stock AFTER sale = before − 2", "GET", "products/{{product_id}}",
+        description="Proves inventory moved: qty dropped by exactly the "
+                    "quantity sold.",
+        tests=status_tests(200, True) + [
+            "const now = pm.response.json().data.quantity;",
+            "const before = Number(pm.collectionVariables.get('qty_before'));",
+            "pm.test('Stock decreased by 2', () => "
+            "pm.expect(before - now).to.eql(2));",
+        ]),
+    req("Sale movement on the ledger", "GET", "stock/movements",
+        query="product_id={{product_id}}",
+        description="A -2 'sale' row now heads the movement ledger.",
+        tests=status_tests(200, True) + [
+            "const m = pm.response.json().data[0];",
+            "pm.test('Latest movement is the sale (-2)', () => {",
+            "    pm.expect(m.reason).to.eql('sale');",
+            "    pm.expect(m.qty_change).to.eql(-2);",
+            "});",
+        ]),
+    # ---- payment variety ----
+    req("Sale with line discount", "POST", "sales",
+        body={"items": [{"product_id": "{{product_id}}", "quantity": 2,
+                         "discount": 0.30}],
+              "payments": [{"method": "cash", "amount": 1.90}]},
+        description="2 × 1.10 − 0.30 discount = 1.90 subtotal.",
+        tests=status_tests(201, True) + [
+            "pm.test('Discount applied', () => "
+            "pm.expect(pm.response.json().data.subtotal).to.eql(1.9));",
+        ]),
+    req("Split payment (cash + card)", "POST", "sales",
+        body={"items": [{"product_id": "{{product_id}}", "quantity": 1}],
+              "payments": [{"method": "cash", "amount": 0.60},
+                           {"method": "card", "amount": 0.50}]},
+        description="Two tenders for one sale — both payment rows saved.",
+        tests=status_tests(201, True) + [
+            "pm.test('Two payments recorded', () => "
+            "pm.expect(pm.response.json().data.payments).to.have.lengthOf(2));",
         ]),
     req("Create credit sale (partial → auto-invoice)", "POST", "sales",
         body={"customer_id": "{{customer_id}}",
               "items": [{"product_id": "{{product_id}}", "quantity": 10}],
               "payments": [{"method": "cash", "amount": 5}]},
-        description="Pays 5.00 of 11.00 → status partial, customer owes 6.00, "
-                    "a customer invoice is auto-created (see Customer Invoices).",
+        description="Pays 5.00 of 11.00 → status partial, customer balance "
+                    "drops, a customer invoice is auto-created.",
         tests=status_tests(201, True) + [
             "pm.test('Sale is partial', () => "
             "pm.expect(pm.response.json().data.status).to.eql('partial'));",
@@ -415,13 +474,65 @@ sales = folder("Sales / POS", (
             "    pm.expect(d.payments).to.be.an('array');",
             "});",
         ]),
+    # ---- idempotency (double-tap / retry) ----
+    req("Idempotent checkout — first", "POST", "sales",
+        prerequest=["pm.collectionVariables.set('sale_uuid', "
+                    "pm.variables.replaceIn('{{$guid}}'));"],
+        body={"uuid": "{{sale_uuid}}",
+              "items": [{"product_id": "{{product_id}}", "quantity": 1}],
+              "payments": [{"method": "cash", "amount": 1.10}]},
+        description="Fresh uuid each run. Stores {{idem_invoice}} + the "
+                    "post-sale stock in {{qty_idem}}.",
+        tests=status_tests(201, True) + [
+            "pm.collectionVariables.set('idem_invoice', "
+            "pm.response.json().data.invoice_no);",
+        ]),
+    req("Stock snapshot after first", "GET", "products/{{product_id}}",
+        tests=status_tests(200, True) + [
+            "pm.collectionVariables.set('qty_idem', "
+            "pm.response.json().data.quantity);",
+        ]),
+    req("Idempotent checkout — retry (same uuid)", "POST", "sales",
+        body={"uuid": "{{sale_uuid}}",
+              "items": [{"product_id": "{{product_id}}", "quantity": 1}],
+              "payments": [{"method": "cash", "amount": 1.10}]},
+        description="Same uuid → returns the SAME sale, does NOT sell again.",
+        tests=status_tests(201, True) + [
+            "pm.test('Same invoice returned', () => "
+            "pm.expect(pm.response.json().data.invoice_no).to.eql("
+            "pm.collectionVariables.get('idem_invoice')));",
+        ]),
+    req("Stock unchanged after retry", "GET", "products/{{product_id}}",
+        description="The idempotent retry must NOT have deducted stock again.",
+        tests=status_tests(200, True) + [
+            "pm.test('No double deduction', () => "
+            "pm.expect(pm.response.json().data.quantity).to.eql("
+            "Number(pm.collectionVariables.get('qty_idem'))));",
+        ]),
+    req("Malformed uuid is tolerated (201, not 500)", "POST", "sales",
+        body={"uuid": "not-a-valid-uuid-way-too-long-1234567890-abcdef",
+              "items": [{"product_id": "{{product_id}}", "quantity": 1}],
+              "payments": [{"method": "cash", "amount": 1.10}]},
+        description="A bad uuid is ignored (server generates one) — never a "
+                    "500 DatabaseException.",
+        tests=status_tests(201, True)),
+    # ---- guards ----
     req("Oversell (422)", "POST", "sales",
         body={"items": [{"product_id": "{{product_id}}", "quantity": 99999}],
               "payments": [{"method": "cash", "amount": 1}]},
+        description="Never sells more than on hand; no partial commit.",
         tests=status_tests(422, False) + error_code_test("INSUFFICIENT_STOCK")),
     req("Empty sale (422)", "POST", "sales",
         body={"items": [], "payments": []},
         tests=status_tests(422, False) + error_code_test("EMPTY_SALE")),
+    req("Zero quantity (422)", "POST", "sales",
+        body={"items": [{"product_id": "{{product_id}}", "quantity": 0}],
+              "payments": []},
+        tests=status_tests(422, False) + error_code_test("INVALID_SALE_ITEM")),
+    req("Nonexistent product (422)", "POST", "sales",
+        body={"items": [{"product_id": 999999, "quantity": 1}],
+              "payments": [{"method": "cash", "amount": 1}]},
+        tests=status_tests(422, False) + error_code_test("PRODUCT_NOT_FOUND")),
     req("Credit without customer (422)", "POST", "sales",
         body={"items": [{"product_id": "{{product_id}}", "quantity": 1}],
               "payments": []},
@@ -920,6 +1031,8 @@ collection = {
         var("own_user_id"), var("manager_role_id"), var("cashier_role_id"),
         var("owner_role_id"), var("role_id"), var("role_name"),
         var("staff_user_id"), var("mgr_email"), var("manager_token"),
+        var("qty_before"), var("sale_uuid"), var("idem_invoice"),
+        var("qty_idem"),
     ],
     "item": [
         authentication, dashboard, categories, products, inventory,

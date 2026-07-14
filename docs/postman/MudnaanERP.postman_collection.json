@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "0288bf85-32b9-465f-9ad1-514aaf80e39c",
+    "_postman_id": "ed7447c9-76a2-4b2c-82fb-343bcab8501b",
     "name": "Mudnaan ERP API",
     "description": "Complete QA collection for the Mudnaan ERP backend (CodeIgniter 4, JWT, tenant-per-database).\n\nHOW TO RUN\n1. Import this collection AND the environment file, select the 'Mudnaan ERP \u2014 Local' environment.\n2. Run 'Authentication \u2192 Login (Owner)' once \u2014 every other request then authenticates automatically via {{token}}.\n3. Or run the WHOLE collection with the Collection Runner: folders are ordered so created resources feed later requests (category \u2192 product \u2192 customer/supplier \u2192 purchase/sale \u2192 documents \u2192 accounting).\n\nNOTES\n- Demo tenant is PREMIUM, so premium routes return 200. On a basic tenant they return 403 PLAN_UPGRADE_REQUIRED.\n- Financial periods have unique date ranges: the second full run gets PERIOD_OVERLAP on 'Create period' (correct behavior) \u2014 delete the April 2026 period or change its dates to re-run.\n- Staff user management endpoints are not in the API yet.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
@@ -126,6 +126,22 @@
     },
     {
       "key": "manager_token",
+      "value": ""
+    },
+    {
+      "key": "qty_before",
+      "value": ""
+    },
+    {
+      "key": "sale_uuid",
+      "value": ""
+    },
+    {
+      "key": "idem_invoice",
+      "value": ""
+    },
+    {
+      "key": "qty_idem",
       "value": ""
     }
   ],
@@ -1838,6 +1854,59 @@
               }
             }
           ]
+        },
+        {
+          "name": "Customer statement (running balance)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/customers/{{customer_id}}/statement",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "customers",
+                "{{customer_id}}",
+                "statement"
+              ]
+            },
+            "description": "Full transaction ledger (sales, invoices, receipts, deposits) with a running balance + summary. Supports ?date_from=&date_to=&type=&q=.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('Statement has entries + summary', () => {",
+                  "    const d = pm.response.json().data;",
+                  "    pm.expect(d).to.have.property('summary');",
+                  "    pm.expect(d).to.have.property('entries');",
+                  "    pm.expect(d.summary).to.have.property('closing_balance');",
+                  "});"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -2268,7 +2337,7 @@
     },
     {
       "name": "Sales / POS",
-      "description": "The POS flow. Totals are always recomputed server-side; a client uuid makes creation idempotent (offline-ready); credit sales require a customer and auto-create a customer invoice. Permissions: sales.view / sales.create.",
+      "description": "The POS flow, covering the real-life scenarios. Totals are recomputed server-side; a proper uuid makes checkout idempotent (safe against double-taps / offline retries); every sale decrements stock through the ledger and posts COGS/Inventory; credit sales require a customer and auto-create an invoice. Permissions: sales.view / sales.create.",
       "item": [
         {
           "name": "List sales",
@@ -2377,7 +2446,54 @@
           ]
         },
         {
-          "name": "Create cash sale",
+          "name": "Stock BEFORE sale (snapshot)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            },
+            "description": "Stores {{qty_before}} so the next request can prove the sale decremented stock by exactly the quantity sold.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('qty_before', pm.response.json().data.quantity);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create cash sale (decrements stock)",
           "request": {
             "method": "POST",
             "header": [
@@ -2399,7 +2515,7 @@
                 "sales"
               ]
             },
-            "description": "2 \u00d7 1.10 = 2.20 fully paid \u2192 status completed. Stock -2. Premium: auto journal entry. Stores {{sale_id}}.",
+            "description": "2 units fully paid \u2192 completed. Stores {{sale_id}}.",
             "auth": {
               "type": "noauth"
             },
@@ -2433,6 +2549,222 @@
           ]
         },
         {
+          "name": "Stock AFTER sale = before \u2212 2",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            },
+            "description": "Proves inventory moved: qty dropped by exactly the quantity sold.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "const now = pm.response.json().data.quantity;",
+                  "const before = Number(pm.collectionVariables.get('qty_before'));",
+                  "pm.test('Stock decreased by 2', () => pm.expect(before - now).to.eql(2));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sale movement on the ledger",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stock/movements?product_id={{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock",
+                "movements"
+              ],
+              "query": [
+                {
+                  "key": "product_id",
+                  "value": "{{product_id}}"
+                }
+              ]
+            },
+            "description": "A -2 'sale' row now heads the movement ledger.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "const m = pm.response.json().data[0];",
+                  "pm.test('Latest movement is the sale (-2)', () => {",
+                  "    pm.expect(m.reason).to.eql('sale');",
+                  "    pm.expect(m.qty_change).to.eql(-2);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sale with line discount",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sales",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sales"
+              ]
+            },
+            "description": "2 \u00d7 1.10 \u2212 0.30 discount = 1.90 subtotal.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"product_id\": \"{{product_id}}\",\n      \"quantity\": 2,\n      \"discount\": 0.3\n    }\n  ],\n  \"payments\": [\n    {\n      \"method\": \"cash\",\n      \"amount\": 1.9\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('Discount applied', () => pm.expect(pm.response.json().data.subtotal).to.eql(1.9));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Split payment (cash + card)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sales",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sales"
+              ]
+            },
+            "description": "Two tenders for one sale \u2014 both payment rows saved.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"product_id\": \"{{product_id}}\",\n      \"quantity\": 1\n    }\n  ],\n  \"payments\": [\n    {\n      \"method\": \"cash\",\n      \"amount\": 0.6\n    },\n    {\n      \"method\": \"card\",\n      \"amount\": 0.5\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('Two payments recorded', () => pm.expect(pm.response.json().data.payments).to.have.lengthOf(2));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Create credit sale (partial \u2192 auto-invoice)",
           "request": {
             "method": "POST",
@@ -2455,7 +2787,7 @@
                 "sales"
               ]
             },
-            "description": "Pays 5.00 of 11.00 \u2192 status partial, customer owes 6.00, a customer invoice is auto-created (see Customer Invoices).",
+            "description": "Pays 5.00 of 11.00 \u2192 status partial, customer balance drops, a customer invoice is auto-created.",
             "auth": {
               "type": "noauth"
             },
@@ -2539,6 +2871,273 @@
           ]
         },
         {
+          "name": "Idempotent checkout \u2014 first",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sales",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sales"
+              ]
+            },
+            "description": "Fresh uuid each run. Stores {{idem_invoice}} + the post-sale stock in {{qty_idem}}.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"uuid\": \"{{sale_uuid}}\",\n  \"items\": [\n    {\n      \"product_id\": \"{{product_id}}\",\n      \"quantity\": 1\n    }\n  ],\n  \"payments\": [\n    {\n      \"method\": \"cash\",\n      \"amount\": 1.1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('sale_uuid', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('idem_invoice', pm.response.json().data.invoice_no);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Stock snapshot after first",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('qty_idem', pm.response.json().data.quantity);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Idempotent checkout \u2014 retry (same uuid)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sales",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sales"
+              ]
+            },
+            "description": "Same uuid \u2192 returns the SAME sale, does NOT sell again.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"uuid\": \"{{sale_uuid}}\",\n  \"items\": [\n    {\n      \"product_id\": \"{{product_id}}\",\n      \"quantity\": 1\n    }\n  ],\n  \"payments\": [\n    {\n      \"method\": \"cash\",\n      \"amount\": 1.1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('Same invoice returned', () => pm.expect(pm.response.json().data.invoice_no).to.eql(pm.collectionVariables.get('idem_invoice')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Stock unchanged after retry",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            },
+            "description": "The idempotent retry must NOT have deducted stock again.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('No double deduction', () => pm.expect(pm.response.json().data.quantity).to.eql(Number(pm.collectionVariables.get('qty_idem'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Malformed uuid is tolerated (201, not 500)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sales",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sales"
+              ]
+            },
+            "description": "A bad uuid is ignored (server generates one) \u2014 never a 500 DatabaseException.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"uuid\": \"not-a-valid-uuid-way-too-long-1234567890-abcdef\",\n  \"items\": [\n    {\n      \"product_id\": \"{{product_id}}\",\n      \"quantity\": 1\n    }\n  ],\n  \"payments\": [\n    {\n      \"method\": \"cash\",\n      \"amount\": 1.1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Oversell (422)",
           "request": {
             "method": "POST",
@@ -2561,7 +3160,7 @@
                 "sales"
               ]
             },
-            "description": "",
+            "description": "Never sells more than on hand; no partial commit.",
             "auth": {
               "type": "noauth"
             },
@@ -2645,6 +3244,118 @@
                   "    pm.expect(body.error).to.have.property('message');",
                   "});",
                   "pm.test('Error code is EMPTY_SALE', () => pm.expect(pm.response.json().error.code).to.eql('EMPTY_SALE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Zero quantity (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sales",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sales"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"product_id\": \"{{product_id}}\",\n      \"quantity\": 0\n    }\n  ],\n  \"payments\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is INVALID_SALE_ITEM', () => pm.expect(pm.response.json().error.code).to.eql('INVALID_SALE_ITEM'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Nonexistent product (422)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/sales",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sales"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\n      \"product_id\": 999999,\n      \"quantity\": 1\n    }\n  ],\n  \"payments\": [\n    {\n      \"method\": \"cash\",\n      \"amount\": 1\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is PRODUCT_NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('PRODUCT_NOT_FOUND'));"
                 ]
               }
             }
