@@ -6,6 +6,7 @@ use App\Controllers\BaseApiController;
 use App\Libraries\AuthContext;
 use App\Models\PurchaseModel;
 use App\Services\PurchaseService;
+use App\Services\ReversalService;
 use CodeIgniter\HTTP\ResponseInterface;
 use InvalidArgumentException;
 
@@ -76,5 +77,41 @@ class PurchasesController extends BaseApiController
         }
 
         return $this->respondData($purchase, 201);
+    }
+
+    /**
+     * POST /purchases/{id}/void  Body: { reason? }
+     * Reverses a purchase (stock + accounting) after dependency checks.
+     * Purchases are never edited or deleted — only voided.
+     */
+    private const VOID_ERRORS = [
+        'PURCHASE_NOT_FOUND' => 'That purchase does not exist.',
+        'ALREADY_CANCELLED'  => 'That purchase is already cancelled.',
+        'PERIOD_CLOSED'      => 'The purchase falls in a closed financial period.',
+        'ITEMS_SOLD'         => 'Some of the received stock has already been sold, so this purchase cannot be reversed.',
+        'HAS_PAYMENTS'       => 'A supplier payment is linked to this purchase; cancel the payment first.',
+    ];
+
+    public function void(int $purchaseId): ResponseInterface
+    {
+        if ($denied = $this->requirePermission('purchases.create')) {
+            return $denied;
+        }
+
+        try {
+            $result = (new ReversalService())->voidPurchase(
+                $purchaseId,
+                $this->branchId(),
+                (string) ($this->body()['reason'] ?? ''),
+                (int) AuthContext::userId(),
+                (string) AuthContext::plan(),
+            );
+        } catch (InvalidArgumentException $exception) {
+            $code = $exception->getMessage();
+
+            return $this->respondError($code, self::VOID_ERRORS[$code] ?? 'Cannot void this purchase.', 422);
+        }
+
+        return $this->respondData($result);
     }
 }

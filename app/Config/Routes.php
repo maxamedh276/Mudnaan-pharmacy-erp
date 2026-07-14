@@ -47,6 +47,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers'], static function (Ro
         $routes->get('purchases', 'Inventory\PurchasesController::index');
         $routes->post('purchases', 'Inventory\PurchasesController::create');
         $routes->get('purchases/(:num)', 'Inventory\PurchasesController::show/$1');
+        $routes->post('purchases/(:num)/void', 'Inventory\PurchasesController::void/$1');
 
         // People
         $routes->get('customers', 'People\CustomersController::index');
@@ -69,6 +70,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers'], static function (Ro
         $routes->get('supplier-bills/(:num)', 'Payables\SupplierBillsController::show/$1');
         $routes->get('supplier-payments', 'Payables\SupplierPaymentsController::index');
         $routes->post('supplier-payments', 'Payables\SupplierPaymentsController::create');
+        $routes->post('supplier-payments/(:num)/void', 'Payables\SupplierPaymentsController::void/$1');
 
         // Accounts receivable — customer invoices, receipts, deposits
         $routes->get('customer-invoices', 'Receivables\InvoicesController::index');
@@ -76,6 +78,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers'], static function (Ro
         $routes->get('customer-invoices/(:num)', 'Receivables\InvoicesController::show/$1');
         $routes->get('customer-receipts', 'Receivables\ReceiptsController::index');
         $routes->post('customer-receipts', 'Receivables\ReceiptsController::create');
+        $routes->post('customer-receipts/(:num)/void', 'Receivables\ReceiptsController::void/$1');
         $routes->get('customer-deposits', 'Receivables\DepositsController::index');
         $routes->post('customer-deposits', 'Receivables\DepositsController::create');
         $routes->post('customer-deposits/(:num)/refund', 'Receivables\DepositsController::refund/$1');

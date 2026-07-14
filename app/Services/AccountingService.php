@@ -358,6 +358,57 @@ class AccountingService
         return $entryId;
     }
 
+    /**
+     * Reverses every posted journal entry raised by a source document
+     * by creating a mirror entry (debits and credits swapped) and
+     * marking the originals 'void'. Financial rows are never deleted —
+     * the original and its reversal both remain for the audit trail.
+     *
+     * @return int number of entries reversed
+     */
+    public function reverseSource(string $sourceType, int $sourceId, int $branchId, ?int $userId): int
+    {
+        $database = db_connect();
+
+        $entries = $database->table('journal_entries')
+            ->where('source_type', $sourceType)
+            ->where('source_id', $sourceId)
+            ->where('status', 'posted')
+            ->get()
+            ->getResultArray();
+
+        foreach ($entries as $entry) {
+            $lines = $database->table('journal_entry_lines')
+                ->where('journal_entry_id', $entry['id'])
+                ->get()
+                ->getResultArray();
+
+            $reversedLines = array_map(static fn (array $line): array => [
+                'account_id' => (int) $line['account_id'],
+                // swap sides to undo the original
+                'debit'      => (float) $line['credit'],
+                'credit'     => (float) $line['debit'],
+                'description'=> 'Reversal',
+            ], $lines);
+
+            $this->createEntry(
+                branchId: $branchId,
+                entryDate: date('Y-m-d'),
+                description: 'Reversal of ' . ($entry['entry_no'] ?? ('#' . $entry['id'])),
+                sourceType: $sourceType . '_reversal',
+                sourceId: $sourceId,
+                lines: $reversedLines,
+                userId: $userId,
+            );
+
+            $database->table('journal_entries')
+                ->where('id', $entry['id'])
+                ->update(['status' => 'void']);
+        }
+
+        return count($entries);
+    }
+
     private function accountIdByCode(string $code): int
     {
         if (! isset($this->accountIds[$code])) {

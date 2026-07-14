@@ -5,6 +5,7 @@ namespace App\Controllers\Payables;
 use App\Controllers\BaseApiController;
 use App\Libraries\AuthContext;
 use App\Services\PayablesService;
+use App\Services\ReversalService;
 use CodeIgniter\HTTP\ResponseInterface;
 use InvalidArgumentException;
 use RuntimeException;
@@ -65,5 +66,38 @@ class SupplierPaymentsController extends BaseApiController
         }
 
         return $this->respondData($payment, 201);
+    }
+
+    private const VOID_ERRORS = [
+        'PAYMENT_NOT_FOUND' => 'That payment does not exist.',
+        'ALREADY_CANCELLED' => 'That payment is already cancelled.',
+        'PERIOD_CLOSED'     => 'The payment falls in a closed financial period and cannot be changed.',
+    ];
+
+    /**
+     * POST /supplier-payments/{id}/void  Body: { reason? }
+     * Reverses the payment's accounting and restores the bill balance.
+     */
+    public function void(int $paymentId): ResponseInterface
+    {
+        if ($denied = $this->requirePermission('bills.manage')) {
+            return $denied;
+        }
+
+        try {
+            $result = (new ReversalService())->voidSupplierPayment(
+                $paymentId,
+                $this->branchId(),
+                (string) ($this->body()['reason'] ?? ''),
+                (int) AuthContext::userId(),
+                (string) AuthContext::plan(),
+            );
+        } catch (InvalidArgumentException $exception) {
+            $code = $exception->getMessage();
+
+            return $this->respondError($code, self::VOID_ERRORS[$code] ?? 'Cannot void this payment.', 422);
+        }
+
+        return $this->respondData($result);
     }
 }
