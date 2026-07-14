@@ -367,27 +367,83 @@ suppliers = folder("Suppliers", (
 ])
 
 purchases = folder("Purchases", (
-    "Goods received — ADDS stock (+qty ledger rows). A purchase that isn't "
-    "fully paid auto-creates a linked supplier bill. Premium tenants also "
-    "get the journal posting (Inventory / Cash + Accounts Payable). "
+    "Goods received — the inverse of a sale: ADDS stock (+qty ledger "
+    "rows) and re-averages the product's cost (weighted average), so "
+    "stock value and the Inventory account rise together. A purchase "
+    "that isn't fully paid auto-creates a linked supplier bill and posts "
+    "Inventory / Cash + Accounts Payable. Purchases are never edited or "
+    "deleted — only VOIDED, and only when nothing depends on them. "
     "Permissions: purchases.view / purchases.create."
 ), [
     req("List purchases", "GET", "purchases", query="page=1&per_page=10",
         tests=status_tests(200, True)),
+    # ---- inventory effect + weighted average ----
+    req("Stock + cost BEFORE purchase", "GET", "products/{{product_id}}",
+        description="Stores {{qty_before_pur}} and {{cost_before_pur}}.",
+        tests=status_tests(200, True) + [
+            "const d = pm.response.json().data;",
+            "pm.collectionVariables.set('qty_before_pur', d.quantity);",
+            "pm.collectionVariables.set('cost_before_pur', d.cost_price);",
+        ]),
     req("Create purchase (partially paid → auto-bill)", "POST", "purchases",
         body={"supplier_id": "{{supplier_id}}", "reference_no": "PO-PM-001",
               "paid_amount": 20,
               "items": [{"product_id": "{{product_id}}", "quantity": 50,
                          "unit_cost": 0.50}]},
-        description="Total 25.00, pays 20.00 → a supplier bill for the "
-                    "outstanding 5.00 appears in Supplier Bills. "
+        description="50 units at 0.50 = 25.00, pays 20.00 → a supplier bill "
+                    "for the outstanding 5.00 appears in Supplier Bills. "
                     "Stores {{purchase_id}}.",
         tests=status_tests(201, True) + capture("purchase_id")),
+    req("Stock AFTER purchase = before + 50", "GET",
+        "products/{{product_id}}",
+        description="Proves the purchase added stock and re-averaged cost "
+                    "(unit cost 0.50 pulls the average below the old cost).",
+        tests=status_tests(200, True) + [
+            "const d = pm.response.json().data;",
+            "const before = "
+            "Number(pm.collectionVariables.get('qty_before_pur'));",
+            "pm.test('Stock increased by 50', () => "
+            "pm.expect(d.quantity - before).to.eql(50));",
+            "pm.test('Weighted-average cost moved toward unit cost', () => "
+            "pm.expect(d.cost_price).to.be.at.most("
+            "Number(pm.collectionVariables.get('cost_before_pur'))));",
+        ]),
     req("Get purchase", "GET", "purchases/{{purchase_id}}",
         tests=status_tests(200, True)),
     req("Create purchase — no items (422)", "POST", "purchases",
         body={"supplier_id": "{{supplier_id}}", "items": []},
         tests=status_tests(422, False) + error_code_test("EMPTY_PURCHASE")),
+    # ---- void (reversal) ----
+    req("Create a voidable purchase", "POST", "purchases",
+        body={"supplier_id": "{{supplier_id}}", "paid_amount": 5.5,
+              "items": [{"product_id": "{{product_id}}", "quantity": 10,
+                         "unit_cost": 0.55}]},
+        description="Fully paid, 10 units — safe to void. "
+                    "Stores {{void_purchase_id}}.",
+        tests=status_tests(201, True) + capture("void_purchase_id")),
+    req("Stock before void", "GET", "products/{{product_id}}",
+        tests=status_tests(200, True) + [
+            "pm.collectionVariables.set('qty_pre_void', "
+            "pm.response.json().data.quantity);",
+        ]),
+    req("Void the purchase → stock reversed", "POST",
+        "purchases/{{void_purchase_id}}/void",
+        body={"reason": "wrong order"},
+        description="Reverses the stock and the accounting; the purchase "
+                    "is marked cancelled (never deleted).",
+        tests=status_tests(200, True) + [
+            "pm.test('Cancelled', () => "
+            "pm.expect(pm.response.json().data.status).to.eql('cancelled'));",
+        ]),
+    req("Stock returned to pre-void − 10", "GET", "products/{{product_id}}",
+        tests=status_tests(200, True) + [
+            "pm.test('10 units removed by the void', () => "
+            "pm.expect(Number(pm.collectionVariables.get('qty_pre_void')) - "
+            "pm.response.json().data.quantity).to.eql(10));",
+        ]),
+    req("Double void → 422", "POST", "purchases/{{void_purchase_id}}/void",
+        body={},
+        tests=status_tests(422, False) + error_code_test("ALREADY_CANCELLED")),
 ])
 
 sales = folder("Sales / POS", (
@@ -635,11 +691,50 @@ supplier_payments = folder("Supplier Payments", (
     req("Pay part of the bill", "POST", "supplier-payments",
         body={"bill_id": "{{bill_id}}", "amount": 100, "method": "cash",
               "reference": "PM-PAY-1"},
-        description="Bill paid_total 100 of 150 → status partial.",
-        tests=status_tests(201, True)),
+        description="Bill paid_total 100 of 150 → status partial. "
+                    "Stores {{supplier_payment_id}}.",
+        tests=status_tests(201, True) + capture("supplier_payment_id")),
     req("Overpayment (422)", "POST", "supplier-payments",
         body={"bill_id": "{{bill_id}}", "amount": 99999},
         tests=status_tests(422, False) + error_code_test("OVERPAYMENT")),
+    req("Void the supplier payment → restores the bill", "POST",
+        "supplier-payments/{{supplier_payment_id}}/void",
+        body={"reason": "entered twice"},
+        description="Reverses the payment's accounting and puts the bill's "
+                    "outstanding balance back.",
+        tests=status_tests(200, True) + [
+            "pm.test('Payment cancelled', () => "
+            "pm.expect(pm.response.json().data.status).to.eql('cancelled'));",
+        ]),
+    # ---- a purchase can't be voided once its bill is paid ----
+    req("Purchase (partial) for the HAS_PAYMENTS guard", "POST", "purchases",
+        body={"supplier_id": "{{supplier_id}}", "reference_no": "PO-HASPAY",
+              "paid_amount": 0,
+              "items": [{"product_id": "{{product_id}}", "quantity": 4,
+                         "unit_cost": 0.50}]},
+        description="Unpaid → auto-creates a bill. Stores {{haspay_purchase_id}}.",
+        tests=status_tests(201, True) + capture("haspay_purchase_id")),
+    req("Find that purchase's auto-bill", "GET", "supplier-bills",
+        query="supplier_id={{supplier_id}}",
+        description="Captures the bill whose purchase_id matches, into "
+                    "{{haspay_bill_id}}.",
+        tests=status_tests(200, True) + [
+            "const target = "
+            "Number(pm.collectionVariables.get('haspay_purchase_id'));",
+            "const bill = pm.response.json().data.find("
+            "b => b.purchase_id === target);",
+            "pm.test('Auto-bill exists for the purchase', () => "
+            "pm.expect(bill, 'linked bill').to.not.be.undefined);",
+            "if (bill) pm.collectionVariables.set('haspay_bill_id', bill.id);",
+        ]),
+    req("Pay that bill", "POST", "supplier-payments",
+        body={"bill_id": "{{haspay_bill_id}}", "amount": 1, "method": "cash"},
+        tests=status_tests(201, True)),
+    req("Void the purchase → 422 (payment linked)", "POST",
+        "purchases/{{haspay_purchase_id}}/void", body={},
+        description="A supplier payment now references this purchase's bill, "
+                    "so the purchase can't be reversed until it's cancelled.",
+        tests=status_tests(422, False) + error_code_test("HAS_PAYMENTS")),
 ])
 
 reports = folder("Reports (Premium)", (
@@ -1032,7 +1127,10 @@ collection = {
         var("owner_role_id"), var("role_id"), var("role_name"),
         var("staff_user_id"), var("mgr_email"), var("manager_token"),
         var("qty_before"), var("sale_uuid"), var("idem_invoice"),
-        var("qty_idem"),
+        var("qty_idem"), var("qty_before_pur"), var("cost_before_pur"),
+        var("void_purchase_id"), var("qty_pre_void"),
+        var("supplier_payment_id"), var("haspay_purchase_id"),
+        var("haspay_bill_id"),
     ],
     "item": [
         authentication, dashboard, categories, products, inventory,

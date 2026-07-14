@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "ed7447c9-76a2-4b2c-82fb-343bcab8501b",
+    "_postman_id": "f16d872e-a1fc-4312-9582-b64ba874ab37",
     "name": "Mudnaan ERP API",
     "description": "Complete QA collection for the Mudnaan ERP backend (CodeIgniter 4, JWT, tenant-per-database).\n\nHOW TO RUN\n1. Import this collection AND the environment file, select the 'Mudnaan ERP \u2014 Local' environment.\n2. Run 'Authentication \u2192 Login (Owner)' once \u2014 every other request then authenticates automatically via {{token}}.\n3. Or run the WHOLE collection with the Collection Runner: folders are ordered so created resources feed later requests (category \u2192 product \u2192 customer/supplier \u2192 purchase/sale \u2192 documents \u2192 accounting).\n\nNOTES\n- Demo tenant is PREMIUM, so premium routes return 200. On a basic tenant they return 403 PLAN_UPGRADE_REQUIRED.\n- Financial periods have unique date ranges: the second full run gets PERIOD_OVERLAP on 'Create period' (correct behavior) \u2014 delete the April 2026 period or change its dates to re-run.\n- Staff user management endpoints are not in the API yet.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
@@ -142,6 +142,34 @@
     },
     {
       "key": "qty_idem",
+      "value": ""
+    },
+    {
+      "key": "qty_before_pur",
+      "value": ""
+    },
+    {
+      "key": "cost_before_pur",
+      "value": ""
+    },
+    {
+      "key": "void_purchase_id",
+      "value": ""
+    },
+    {
+      "key": "qty_pre_void",
+      "value": ""
+    },
+    {
+      "key": "supplier_payment_id",
+      "value": ""
+    },
+    {
+      "key": "haspay_purchase_id",
+      "value": ""
+    },
+    {
+      "key": "haspay_bill_id",
       "value": ""
     }
   ],
@@ -2119,7 +2147,7 @@
     },
     {
       "name": "Purchases",
-      "description": "Goods received \u2014 ADDS stock (+qty ledger rows). A purchase that isn't fully paid auto-creates a linked supplier bill. Premium tenants also get the journal posting (Inventory / Cash + Accounts Payable). Permissions: purchases.view / purchases.create.",
+      "description": "Goods received \u2014 the inverse of a sale: ADDS stock (+qty ledger rows) and re-averages the product's cost (weighted average), so stock value and the Inventory account rise together. A purchase that isn't fully paid auto-creates a linked supplier bill and posts Inventory / Cash + Accounts Payable. Purchases are never edited or deleted \u2014 only VOIDED, and only when nothing depends on them. Permissions: purchases.view / purchases.create.",
       "item": [
         {
           "name": "List purchases",
@@ -2177,6 +2205,55 @@
           ]
         },
         {
+          "name": "Stock + cost BEFORE purchase",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            },
+            "description": "Stores {{qty_before_pur}} and {{cost_before_pur}}.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "const d = pm.response.json().data;",
+                  "pm.collectionVariables.set('qty_before_pur', d.quantity);",
+                  "pm.collectionVariables.set('cost_before_pur', d.cost_price);"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Create purchase (partially paid \u2192 auto-bill)",
           "request": {
             "method": "POST",
@@ -2199,7 +2276,7 @@
                 "purchases"
               ]
             },
-            "description": "Total 25.00, pays 20.00 \u2192 a supplier bill for the outstanding 5.00 appears in Supplier Bills. Stores {{purchase_id}}.",
+            "description": "50 units at 0.50 = 25.00, pays 20.00 \u2192 a supplier bill for the outstanding 5.00 appears in Supplier Bills. Stores {{purchase_id}}.",
             "auth": {
               "type": "noauth"
             },
@@ -2226,6 +2303,56 @@
                   "    pm.expect(body).to.have.property('data');",
                   "});",
                   "pm.collectionVariables.set('purchase_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Stock AFTER purchase = before + 50",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            },
+            "description": "Proves the purchase added stock and re-averaged cost (unit cost 0.50 pulls the average below the old cost).",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "const d = pm.response.json().data;",
+                  "const before = Number(pm.collectionVariables.get('qty_before_pur'));",
+                  "pm.test('Stock increased by 50', () => pm.expect(d.quantity - before).to.eql(50));",
+                  "pm.test('Weighted-average cost moved toward unit cost', () => pm.expect(d.cost_price).to.be.at.most(Number(pm.collectionVariables.get('cost_before_pur'))));"
                 ]
               }
             }
@@ -2328,6 +2455,270 @@
                   "    pm.expect(body.error).to.have.property('message');",
                   "});",
                   "pm.test('Error code is EMPTY_PURCHASE', () => pm.expect(pm.response.json().error.code).to.eql('EMPTY_PURCHASE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create a voidable purchase",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/purchases",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "purchases"
+              ]
+            },
+            "description": "Fully paid, 10 units \u2014 safe to void. Stores {{void_purchase_id}}.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplier_id\": \"{{supplier_id}}\",\n  \"paid_amount\": 5.5,\n  \"items\": [\n    {\n      \"product_id\": \"{{product_id}}\",\n      \"quantity\": 10,\n      \"unit_cost\": 0.55\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('void_purchase_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Stock before void",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('qty_pre_void', pm.response.json().data.quantity);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Void the purchase \u2192 stock reversed",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/purchases/{{void_purchase_id}}/void",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "purchases",
+                "{{void_purchase_id}}",
+                "void"
+              ]
+            },
+            "description": "Reverses the stock and the accounting; the purchase is marked cancelled (never deleted).",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"wrong order\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('Cancelled', () => pm.expect(pm.response.json().data.status).to.eql('cancelled'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Stock returned to pre-void \u2212 10",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('10 units removed by the void', () => pm.expect(Number(pm.collectionVariables.get('qty_pre_void')) - pm.response.json().data.quantity).to.eql(10));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Double void \u2192 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/purchases/{{void_purchase_id}}/void",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "purchases",
+                "{{void_purchase_id}}",
+                "void"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is ALREADY_CANCELLED', () => pm.expect(pm.response.json().error.code).to.eql('ALREADY_CANCELLED'));"
                 ]
               }
             }
@@ -4393,7 +4784,7 @@
                 "supplier-payments"
               ]
             },
-            "description": "Bill paid_total 100 of 150 \u2192 status partial.",
+            "description": "Bill paid_total 100 of 150 \u2192 status partial. Stores {{supplier_payment_id}}.",
             "auth": {
               "type": "noauth"
             },
@@ -4418,7 +4809,8 @@
                   "    const body = pm.response.json();",
                   "    pm.expect(body.success).to.be.true;",
                   "    pm.expect(body).to.have.property('data');",
-                  "});"
+                  "});",
+                  "pm.collectionVariables.set('supplier_payment_id', pm.response.json().data.id);"
                 ]
               }
             }
@@ -4475,6 +4867,285 @@
                   "    pm.expect(body.error).to.have.property('message');",
                   "});",
                   "pm.test('Error code is OVERPAYMENT', () => pm.expect(pm.response.json().error.code).to.eql('OVERPAYMENT'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Void the supplier payment \u2192 restores the bill",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/supplier-payments/{{supplier_payment_id}}/void",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "supplier-payments",
+                "{{supplier_payment_id}}",
+                "void"
+              ]
+            },
+            "description": "Reverses the payment's accounting and puts the bill's outstanding balance back.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"entered twice\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('Payment cancelled', () => pm.expect(pm.response.json().data.status).to.eql('cancelled'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Purchase (partial) for the HAS_PAYMENTS guard",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/purchases",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "purchases"
+              ]
+            },
+            "description": "Unpaid \u2192 auto-creates a bill. Stores {{haspay_purchase_id}}.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"supplier_id\": \"{{supplier_id}}\",\n  \"reference_no\": \"PO-HASPAY\",\n  \"paid_amount\": 0,\n  \"items\": [\n    {\n      \"product_id\": \"{{product_id}}\",\n      \"quantity\": 4,\n      \"unit_cost\": 0.5\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.collectionVariables.set('haspay_purchase_id', pm.response.json().data.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Find that purchase's auto-bill",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/supplier-bills?supplier_id={{supplier_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "supplier-bills"
+              ],
+              "query": [
+                {
+                  "key": "supplier_id",
+                  "value": "{{supplier_id}}"
+                }
+              ]
+            },
+            "description": "Captures the bill whose purchase_id matches, into {{haspay_bill_id}}.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "const target = Number(pm.collectionVariables.get('haspay_purchase_id'));",
+                  "const bill = pm.response.json().data.find(b => b.purchase_id === target);",
+                  "pm.test('Auto-bill exists for the purchase', () => pm.expect(bill, 'linked bill').to.not.be.undefined);",
+                  "if (bill) pm.collectionVariables.set('haspay_bill_id', bill.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Pay that bill",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/supplier-payments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "supplier-payments"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bill_id\": \"{{haspay_bill_id}}\",\n  \"amount\": 1,\n  \"method\": \"cash\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Void the purchase \u2192 422 (payment linked)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/purchases/{{haspay_purchase_id}}/void",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "purchases",
+                "{{haspay_purchase_id}}",
+                "void"
+              ]
+            },
+            "description": "A supplier payment now references this purchase's bill, so the purchase can't be reversed until it's cancelled.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 422', () => pm.response.to.have.status(422));",
+                  "pm.test('Envelope success=false with error code', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.false;",
+                  "    pm.expect(body.error).to.have.property('code');",
+                  "    pm.expect(body.error).to.have.property('message');",
+                  "});",
+                  "pm.test('Error code is HAS_PAYMENTS', () => pm.expect(pm.response.json().error.code).to.eql('HAS_PAYMENTS'));"
                 ]
               }
             }
