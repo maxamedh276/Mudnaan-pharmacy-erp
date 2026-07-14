@@ -87,9 +87,16 @@ class PurchaseService
         $database->table('purchase_items')->insertBatch($itemRows);
 
         foreach ($itemRows as $itemRow) {
+            $productId = (int) $itemRow['product_id'];
+
+            // WEIGHTED-AVERAGE COST: fold the receipt into the product's
+            // cost so stock valuation (qty × cost) and the Inventory
+            // account (which rises by qty × unit_cost) stay identical.
+            $this->reaverageCost($branchId, $productId, $itemRow['quantity'], (float) $itemRow['unit_cost']);
+
             $this->inventory->recordMovement(
                 $branchId,
-                (int) $itemRow['product_id'],
+                $productId,
                 $itemRow['quantity'],
                 'purchase',
                 'purchase',
@@ -113,5 +120,22 @@ class PurchaseService
         $database->transComplete();
 
         return $this->purchases->findDetailed($purchaseId, $branchId);
+    }
+
+    /**
+     * Updates a product's cost_price to the new weighted average after
+     * receiving `qty` units at `unitCost`.
+     */
+    private function reaverageCost(int $branchId, int $productId, float $qty, float $unitCost): void
+    {
+        $onHand  = $this->inventory->currentQuantity($branchId, $productId);
+        $oldCost = (float) ($this->products->find($productId)['cost_price'] ?? 0);
+        $newQty  = $onHand + $qty;
+
+        $newCost = $newQty > 0
+            ? round(($onHand * $oldCost + $qty * $unitCost) / $newQty, 2)
+            : round($unitCost, 2);
+
+        $this->products->update($productId, ['cost_price' => $newCost]);
     }
 }

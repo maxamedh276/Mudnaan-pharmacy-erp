@@ -231,24 +231,60 @@ products = folder("Products", (
 ])
 
 inventory = folder("Inventory — Stock", (
-    "The stock ledger. Permissions: stock.view / stock.adjust."
+    "The stock ledger AND its accounting. Every manual adjustment posts "
+    "at cost to the books (Inventory <-> Inventory Adjustment 5100), so "
+    "stock_value and book_value stay reconciled. Opening stock on a new "
+    "product posts Inventory / Owner's Capital. "
+    "Permissions: stock.view / stock.adjust."
 ), [
     req("Stock overview", "GET", "stock", query="per_page=10",
-        description="summary {total_units, stock_value, low_stock, "
-                    "out_of_stock} + per-product levels.",
+        description="summary {total_units, stock_value, book_value (the "
+                    "Inventory GL balance, Premium), low_stock, out_of_stock} "
+                    "+ per-product levels.",
         tests=status_tests(200, True) + [
-            "pm.test('Has summary', () => "
-            "pm.expect(pm.response.json().data).to.have.property('summary'));",
+            "const s = pm.response.json().data.summary;",
+            "pm.test('Summary has financial figures', () => {",
+            "    pm.expect(s).to.have.property('stock_value');",
+            "    pm.expect(s).to.have.property('book_value');",
+            "});",
+            "pm.collectionVariables.set('stock_value_before', s.stock_value);",
         ]),
     req("Stock movements (all)", "GET", "stock/movements", query="per_page=10",
+        description="Each row carries cost_value (|qty| × cost price).",
         tests=status_tests(200, True)),
     req("Stock movements (one product)", "GET", "stock/movements",
         query="product_id={{product_id}}",
         tests=status_tests(200, True)),
-    req("Adjustment +5", "POST", "stock/adjustments",
-        body={"product_id": "{{product_id}}", "qty_change": 5},
-        description="Writes an 'adjustment' ledger row and updates the cache.",
+    req("Stock in +5 (posts to Inventory)", "POST", "stock/adjustments",
+        body={"product_id": "{{product_id}}", "qty_change": 5,
+              "note": "Postman count correction"},
+        description="Writes a +5 ledger row and, on Premium, posts value "
+                    "at cost: DEBIT Inventory / CREDIT Inventory Adjustment. "
+                    "Returns {product, value}.",
+        tests=status_tests(201, True) + [
+            "pm.test('Returns product + value moved', () => {",
+            "    const d = pm.response.json().data;",
+            "    pm.expect(d).to.have.property('product');",
+            "    pm.expect(d).to.have.property('value');",
+            "});",
+        ]),
+    req("Write-off -2 (damage)", "POST", "stock/adjustments",
+        body={"product_id": "{{product_id}}", "qty_change": -2,
+              "note": "Postman damaged stock write-off"},
+        description="Negative adjustment posts DEBIT Inventory Adjustment / "
+                    "CREDIT Inventory — a stock loss on the P&L.",
         tests=status_tests(201, True)),
+    req("Book value tracks stock value", "GET", "stock", query="per_page=1",
+        description="After the adjustments, book_value should still equal "
+                    "stock_value (inventory and the ledger stay in step).",
+        tests=status_tests(200, True) + [
+            "const s = pm.response.json().data.summary;",
+            "pm.test('stock_value == book_value', () => {",
+            "    if (s.book_value !== null)",
+            "        pm.expect(Math.abs(s.stock_value - s.book_value))"
+            ".to.be.below(0.01);",
+            "});",
+        ]),
     req("Adjustment below zero (422)", "POST", "stock/adjustments",
         body={"product_id": "{{product_id}}", "qty_change": -99999},
         description="Guard: stock can never go negative.",
@@ -718,6 +754,7 @@ collection = {
         var("invoice_id"), var("deposit_id"), var("bill_id"),
         var("period_id"), var("bank_account_id"), var("budget_id"),
         var("journal_id"), var("rent_account_id"), var("cash_account_id"),
+        var("stock_value_before"),
     ],
     "item": [
         authentication, dashboard, categories, products, inventory,

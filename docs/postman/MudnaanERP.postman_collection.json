@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "eab83770-c566-4bac-b527-f4de4da4b78f",
+    "_postman_id": "cda6a12b-3178-49a3-8377-6930d5bab92c",
     "name": "Mudnaan ERP API",
     "description": "Complete QA collection for the Mudnaan ERP backend (CodeIgniter 4, JWT, tenant-per-database).\n\nHOW TO RUN\n1. Import this collection AND the environment file, select the 'Mudnaan ERP \u2014 Local' environment.\n2. Run 'Authentication \u2192 Login (Owner)' once \u2014 every other request then authenticates automatically via {{token}}.\n3. Or run the WHOLE collection with the Collection Runner: folders are ordered so created resources feed later requests (category \u2192 product \u2192 customer/supplier \u2192 purchase/sale \u2192 documents \u2192 accounting).\n\nNOTES\n- Demo tenant is PREMIUM, so premium routes return 200. On a basic tenant they return 403 PLAN_UPGRADE_REQUIRED.\n- Financial periods have unique date ranges: the second full run gets PERIOD_OVERLAP on 'Create period' (correct behavior) \u2014 delete the April 2026 period or change its dates to re-run.\n- Staff user management endpoints are not in the API yet.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
@@ -82,6 +82,10 @@
     },
     {
       "key": "cash_account_id",
+      "value": ""
+    },
+    {
+      "key": "stock_value_before",
       "value": ""
     }
   ],
@@ -1132,7 +1136,7 @@
     },
     {
       "name": "Inventory \u2014 Stock",
-      "description": "The stock ledger. Permissions: stock.view / stock.adjust.",
+      "description": "The stock ledger AND its accounting. Every manual adjustment posts at cost to the books (Inventory <-> Inventory Adjustment 5100), so stock_value and book_value stay reconciled. Opening stock on a new product posts Inventory / Owner's Capital. Permissions: stock.view / stock.adjust.",
       "item": [
         {
           "name": "Stock overview",
@@ -1163,7 +1167,7 @@
                 }
               ]
             },
-            "description": "summary {total_units, stock_value, low_stock, out_of_stock} + per-product levels.",
+            "description": "summary {total_units, stock_value, book_value (the Inventory GL balance, Premium), low_stock, out_of_stock} + per-product levels.",
             "auth": {
               "type": "noauth"
             }
@@ -1180,7 +1184,12 @@
                   "    pm.expect(body.success).to.be.true;",
                   "    pm.expect(body).to.have.property('data');",
                   "});",
-                  "pm.test('Has summary', () => pm.expect(pm.response.json().data).to.have.property('summary'));"
+                  "const s = pm.response.json().data.summary;",
+                  "pm.test('Summary has financial figures', () => {",
+                  "    pm.expect(s).to.have.property('stock_value');",
+                  "    pm.expect(s).to.have.property('book_value');",
+                  "});",
+                  "pm.collectionVariables.set('stock_value_before', s.stock_value);"
                 ]
               }
             }
@@ -1216,7 +1225,7 @@
                 }
               ]
             },
-            "description": "",
+            "description": "Each row carries cost_value (|qty| \u00d7 cost price).",
             "auth": {
               "type": "noauth"
             }
@@ -1291,7 +1300,7 @@
           ]
         },
         {
-          "name": "Adjustment +5",
+          "name": "Stock in +5 (posts to Inventory)",
           "request": {
             "method": "POST",
             "header": [
@@ -1314,13 +1323,13 @@
                 "adjustments"
               ]
             },
-            "description": "Writes an 'adjustment' ledger row and updates the cache.",
+            "description": "Writes a +5 ledger row and, on Premium, posts value at cost: DEBIT Inventory / CREDIT Inventory Adjustment. Returns {product, value}.",
             "auth": {
               "type": "noauth"
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"qty_change\": 5\n}",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"qty_change\": 5,\n  \"note\": \"Postman count correction\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1339,6 +1348,122 @@
                   "    const body = pm.response.json();",
                   "    pm.expect(body.success).to.be.true;",
                   "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "pm.test('Returns product + value moved', () => {",
+                  "    const d = pm.response.json().data;",
+                  "    pm.expect(d).to.have.property('product');",
+                  "    pm.expect(d).to.have.property('value');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Write-off -2 (damage)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stock/adjustments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock",
+                "adjustments"
+              ]
+            },
+            "description": "Negative adjustment posts DEBIT Inventory Adjustment / CREDIT Inventory \u2014 a stock loss on the P&L.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"qty_change\": -2,\n  \"note\": \"Postman damaged stock write-off\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Book value tracks stock value",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stock?per_page=1",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock"
+              ],
+              "query": [
+                {
+                  "key": "per_page",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "After the adjustments, book_value should still equal stock_value (inventory and the ledger stay in step).",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Envelope success=true', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.be.true;",
+                  "    pm.expect(body).to.have.property('data');",
+                  "});",
+                  "const s = pm.response.json().data.summary;",
+                  "pm.test('stock_value == book_value', () => {",
+                  "    if (s.book_value !== null)",
+                  "        pm.expect(Math.abs(s.stock_value - s.book_value)).to.be.below(0.01);",
                   "});"
                 ]
               }
