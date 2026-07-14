@@ -83,6 +83,19 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers'], static function (Ro
         $routes->post('customer-deposits', 'Receivables\DepositsController::create');
         $routes->post('customer-deposits/(:num)/refund', 'Receivables\DepositsController::refund/$1');
 
+        // Staff, roles & permissions (users.manage)
+        $routes->get('users', 'Admin\UsersController::index');
+        $routes->post('users', 'Admin\UsersController::create');
+        $routes->get('users/(:num)', 'Admin\UsersController::show/$1');
+        $routes->put('users/(:num)', 'Admin\UsersController::update/$1');
+        $routes->post('users/(:num)/active', 'Admin\UsersController::setActive/$1');
+        $routes->get('roles', 'Admin\RolesController::index');
+        $routes->post('roles', 'Admin\RolesController::create');
+        $routes->get('roles/(:num)', 'Admin\RolesController::show/$1');
+        $routes->put('roles/(:num)', 'Admin\RolesController::update/$1');
+        $routes->delete('roles/(:num)', 'Admin\RolesController::delete/$1');
+        $routes->get('permissions', 'Admin\RolesController::permissions');
+
         // Basic dashboard (all plans)
         $routes->get('reports/dashboard', 'Reports\ReportsController::dashboard');
 
