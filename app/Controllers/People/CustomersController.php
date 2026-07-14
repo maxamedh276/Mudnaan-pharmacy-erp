@@ -4,10 +4,37 @@ namespace App\Controllers\People;
 
 use App\Controllers\BaseApiController;
 use App\Models\CustomerModel;
+use App\Services\StatementService;
 use CodeIgniter\HTTP\ResponseInterface;
 
 class CustomersController extends BaseApiController
 {
+    /**
+     * GET /customers/{id}/statement?date_from=&date_to=&type=&q=
+     * Full transaction ledger + summary for one customer.
+     */
+    public function statement(int $customerId): ResponseInterface
+    {
+        if ($denied = $this->requirePermission('customers.view')) {
+            return $denied;
+        }
+
+        $statement = (new StatementService())->customerStatement(
+            $customerId,
+            $this->branchId(),
+            [
+                'date_from' => $this->request->getGet('date_from'),
+                'date_to'   => $this->request->getGet('date_to'),
+                'type'      => $this->request->getGet('type'),
+                'q'         => $this->request->getGet('q'),
+            ],
+        );
+
+        return $statement === []
+            ? $this->respondNotFound('Customer')
+            : $this->respondData($statement);
+    }
+
     public function index(): ResponseInterface
     {
         if ($denied = $this->requirePermission('customers.view')) {

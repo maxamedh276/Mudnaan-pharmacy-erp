@@ -52,11 +52,13 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers'], static function (Ro
         $routes->get('customers', 'People\CustomersController::index');
         $routes->post('customers', 'People\CustomersController::create');
         $routes->get('customers/(:num)', 'People\CustomersController::show/$1');
+        $routes->get('customers/(:num)/statement', 'People\CustomersController::statement/$1');
         $routes->put('customers/(:num)', 'People\CustomersController::update/$1');
         $routes->delete('customers/(:num)', 'People\CustomersController::delete/$1');
         $routes->get('suppliers', 'People\SuppliersController::index');
         $routes->post('suppliers', 'People\SuppliersController::create');
         $routes->get('suppliers/(:num)', 'People\SuppliersController::show/$1');
+        $routes->get('suppliers/(:num)/statement', 'People\SuppliersController::statement/$1');
         $routes->put('suppliers/(:num)', 'People\SuppliersController::update/$1');
         $routes->delete('suppliers/(:num)', 'People\SuppliersController::delete/$1');
 

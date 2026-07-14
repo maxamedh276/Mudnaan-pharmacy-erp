@@ -69,7 +69,7 @@ class FinancialPeriodService
 
         $periodId = (int) $database->insertID();
 
-        AuditService::log('financial_period.create', 'financial_periods', $periodId, [
+        AuditService::log('financial_period.create', 'accounting', 'financial_periods', $periodId, details: [
             'range' => "$startDate..$endDate",
         ]);
 
@@ -105,7 +105,7 @@ class FinancialPeriodService
             'closed_at' => $status === 'closed' ? date('Y-m-d H:i:s') : null,
         ]);
 
-        AuditService::log("financial_period.$status", 'financial_periods', $periodId);
+        AuditService::log("financial_period.$status", 'accounting', 'financial_periods', $periodId);
 
         return $this->find($periodId);
     }

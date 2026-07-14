@@ -99,7 +99,7 @@ class BudgetService
 
         $database->transComplete();
 
-        AuditService::log('budget.create', 'budgets', $budgetId, ['lines' => count($lineRows)]);
+        AuditService::log('budget.create', 'accounting', 'budgets', $budgetId, details: ['lines' => count($lineRows)]);
 
         return $this->report($budgetId, $branchId);
     }

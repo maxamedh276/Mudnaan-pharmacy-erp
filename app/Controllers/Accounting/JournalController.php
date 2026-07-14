@@ -132,15 +132,23 @@ class JournalController extends BaseApiController
         } catch (InvalidArgumentException | RuntimeException $exception) {
             $database->transRollback();
 
-            if ($exception->getMessage() === 'PERIOD_CLOSED') {
-                return $this->respondError(
+            return match ($exception->getMessage()) {
+                'PERIOD_CLOSED' => $this->respondError(
                     'PERIOD_CLOSED',
                     'That date falls in a closed financial period.',
                     422,
-                );
-            }
-
-            return $this->respondError('UNBALANCED_ENTRY', $exception->getMessage(), 422);
+                ),
+                'INACTIVE_ACCOUNT' => $this->respondError(
+                    'INACTIVE_ACCOUNT',
+                    'One of the accounts is inactive or not postable.',
+                    422,
+                ),
+                default => $this->respondError(
+                    'UNBALANCED_ENTRY',
+                    $exception->getMessage(),
+                    422,
+                ),
+            };
         }
 
         $database->transComplete();

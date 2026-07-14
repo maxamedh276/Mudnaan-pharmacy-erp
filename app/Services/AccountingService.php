@@ -309,6 +309,7 @@ class AccountingService
             }
 
             $accountId = $line['account_id'] ?? $this->accountIdByCode($line['code']);
+            $this->assertPostable($accountId);
 
             $totalDebit  += $debit;
             $totalCredit += $credit;
@@ -375,5 +376,23 @@ class AccountingService
         }
 
         return $this->accountIds[$code];
+    }
+
+    /**
+     * Journal lines may only hit an account that is active and postable
+     * (header/deactivated accounts are rejected before anything saves).
+     */
+    private function assertPostable(int $accountId): void
+    {
+        $row = db_connect()->table('accounts')
+            ->select('is_postable, is_active')
+            ->where('id', $accountId)
+            ->where('deleted_at', null)
+            ->get()
+            ->getRowArray();
+
+        if ($row === null || ! (int) $row['is_postable'] || ! (int) $row['is_active']) {
+            throw new RuntimeException('INACTIVE_ACCOUNT');
+        }
     }
 }

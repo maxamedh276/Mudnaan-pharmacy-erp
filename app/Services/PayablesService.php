@@ -237,7 +237,7 @@ class PayablesService
 
         $database->transComplete();
 
-        AuditService::log('supplier_bill.create', 'supplier_bills', $billId, ['total' => $total]);
+        AuditService::log('supplier_bill.create', 'payables', 'supplier_bills', $billId, details: ['total' => $total]);
 
         return $this->findBill($billId, $branchId);
     }
@@ -362,7 +362,7 @@ class PayablesService
 
         $database->transComplete();
 
-        AuditService::log('supplier_payment.create', 'supplier_payments', $paymentId, [
+        AuditService::log('supplier_payment.create', 'payables', 'supplier_payments', $paymentId, details: [
             'amount' => $amount, 'bill_id' => $billId,
         ]);
 

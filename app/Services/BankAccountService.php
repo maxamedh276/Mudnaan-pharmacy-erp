@@ -97,7 +97,7 @@ class BankAccountService
 
         $database->transComplete();
 
-        AuditService::log('bank_account.create', 'bank_accounts', $bankAccountId, [
+        AuditService::log('bank_account.create', 'banking', 'bank_accounts', $bankAccountId, details: [
             'gl_code' => $glCode, 'opening' => $openingBalance,
         ]);
 
@@ -126,7 +126,7 @@ class BankAccountService
             }
         }
 
-        AuditService::log('bank_account.update', 'bank_accounts', $bankAccountId);
+        AuditService::log('bank_account.update', 'banking', 'bank_accounts', $bankAccountId);
 
         return $this->findOrFail($bankAccountId);
     }

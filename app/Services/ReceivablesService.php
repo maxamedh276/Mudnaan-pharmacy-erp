@@ -321,7 +321,7 @@ class ReceivablesService
 
         $database->transComplete();
 
-        AuditService::log('customer_invoice.create', 'customer_invoices', $invoiceId, ['total' => $total]);
+        AuditService::log('customer_invoice.create', 'receivables', 'customer_invoices', $invoiceId, details: ['total' => $total]);
 
         return $this->findInvoice($invoiceId, $branchId);
     }
@@ -451,7 +451,7 @@ class ReceivablesService
 
         $database->transComplete();
 
-        AuditService::log('customer_receipt.create', 'customer_receipts', $receiptId, [
+        AuditService::log('customer_receipt.create', 'receivables', 'customer_receipts', $receiptId, details: [
             'amount' => $amount, 'invoice_id' => $invoiceId,
         ]);
 
@@ -520,7 +520,7 @@ class ReceivablesService
 
         $database->transComplete();
 
-        AuditService::log('customer_deposit.create', 'customer_deposits', $depositId, ['amount' => $amount]);
+        AuditService::log('customer_deposit.create', 'receivables', 'customer_deposits', $depositId, details: ['amount' => $amount]);
 
         $deposit = $database->table('customer_deposits')
             ->select('customer_deposits.*, customers.name AS customer_name')
@@ -579,7 +579,7 @@ class ReceivablesService
 
         $database->transComplete();
 
-        AuditService::log('customer_deposit.refund', 'customer_deposits', $depositId, ['amount' => $refundable]);
+        AuditService::log('customer_deposit.refund', 'receivables', 'customer_deposits', $depositId, details: ['amount' => $refundable]);
 
         $deposit = $database->table('customer_deposits')->where('id', $depositId)->get()->getRowArray();
         $deposit['id']          = (int) $deposit['id'];

@@ -4,10 +4,37 @@ namespace App\Controllers\People;
 
 use App\Controllers\BaseApiController;
 use App\Models\SupplierModel;
+use App\Services\StatementService;
 use CodeIgniter\HTTP\ResponseInterface;
 
 class SuppliersController extends BaseApiController
 {
+    /**
+     * GET /suppliers/{id}/statement?date_from=&date_to=&type=&q=
+     * Full transaction ledger + summary for one supplier.
+     */
+    public function statement(int $supplierId): ResponseInterface
+    {
+        if ($denied = $this->requirePermission('suppliers.view')) {
+            return $denied;
+        }
+
+        $statement = (new StatementService())->supplierStatement(
+            $supplierId,
+            $this->branchId(),
+            [
+                'date_from' => $this->request->getGet('date_from'),
+                'date_to'   => $this->request->getGet('date_to'),
+                'type'      => $this->request->getGet('type'),
+                'q'         => $this->request->getGet('q'),
+            ],
+        );
+
+        return $statement === []
+            ? $this->respondNotFound('Supplier')
+            : $this->respondData($statement);
+    }
+
     public function index(): ResponseInterface
     {
         if ($denied = $this->requirePermission('suppliers.view')) {
