@@ -233,6 +233,7 @@ CREATE TABLE products (
   tax_rate      DECIMAL(5,2)  NOT NULL DEFAULT 0.00,  -- % tax on this item
   reorder_level INT           NOT NULL DEFAULT 0,     -- alert when stock <= this
   attributes    JSON          NULL,            -- {"voltage":"220V","dosage":"500mg"}
+  image_path    VARCHAR(255)  NULL,            -- web-relative path under uploads/products/
   track_batches TINYINT(1)    NOT NULL DEFAULT 0, -- 1 for pharmacy/grocery items
   track_serials TINYINT(1)    NOT NULL DEFAULT 0, -- 1 for electronics items
   is_active     TINYINT(1)    NOT NULL DEFAULT 1,
@@ -450,6 +451,7 @@ CREATE TABLE payments (
   sale_id     BIGINT UNSIGNED NOT NULL,
   method      ENUM('cash','card','mobile_money','bank','credit')
                           NOT NULL DEFAULT 'cash',
+  bank_account_id BIGINT UNSIGNED NULL,        -- which money account it landed in (FK added in 04_*)
   amount      DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   reference   VARCHAR(120) NULL,               -- e.g. mobile-money transaction id
   paid_at     TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
@@ -478,6 +480,9 @@ CREATE TABLE purchases (
   reference_no  VARCHAR(80)  NULL,             -- supplier invoice number
   total         DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   status        ENUM('received','pending','cancelled') NOT NULL DEFAULT 'received',
+  method          ENUM('cash','card','mobile_money','bank','cheque')
+                          NOT NULL DEFAULT 'cash',  -- how the paid portion was settled
+  bank_account_id BIGINT UNSIGNED NULL,             -- which money account paid (FK added in 04_*)
   purchased_at  TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
   created_at    TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),

@@ -125,6 +125,61 @@ class ProductsController extends BaseApiController
         return $this->respondData($productModel->findWithStock($productId, $this->branchId()));
     }
 
+    /**
+     * POST /api/v1/products/{id}/image  (multipart, field: image)
+     * Stores the photo under the web-served uploads/products/ folder and
+     * saves its relative path on the product.
+     */
+    public function uploadImage(int $productId): ResponseInterface
+    {
+        if ($denied = $this->requirePermission('products.edit')) {
+            return $denied;
+        }
+
+        $productModel = new ProductModel();
+        $existing     = $productModel->find($productId);
+
+        if ($existing === null) {
+            return $this->respondNotFound('Product');
+        }
+
+        $file = $this->request->getFile('image');
+
+        if ($file === null || ! $file->isValid()) {
+            return $this->respondValidationErrors(['image' => 'A valid image file is required.']);
+        }
+
+        if (! in_array(strtolower((string) $file->getExtension()), ['jpg', 'jpeg', 'png', 'webp'], true)) {
+            return $this->respondValidationErrors(['image' => 'Only JPG, PNG or WEBP images are allowed.']);
+        }
+
+        if ($file->getSize() > 4 * 1024 * 1024) {
+            return $this->respondValidationErrors(['image' => 'Image must be 4 MB or smaller.']);
+        }
+
+        $dir = FCPATH . 'uploads/products/';
+
+        if (! is_dir($dir)) {
+            mkdir($dir, 0775, true);
+        }
+
+        $newName = $file->getRandomName();
+        $file->move($dir, $newName);
+
+        // Drop the previous image file, if any, so old uploads don't pile up.
+        if (! empty($existing['image_path'])) {
+            $old = FCPATH . $existing['image_path'];
+
+            if (is_file($old)) {
+                @unlink($old);
+            }
+        }
+
+        $productModel->update($productId, ['image_path' => 'uploads/products/' . $newName]);
+
+        return $this->respondData($productModel->findWithStock($productId, $this->branchId()));
+    }
+
     public function delete(int $productId): ResponseInterface
     {
         if ($denied = $this->requirePermission('products.delete')) {

@@ -15,7 +15,7 @@ class ProductModel extends Model
     protected $allowedFields  = [
         'category_id', 'supplier_id', 'sku', 'barcode', 'name', 'brand',
         'unit', 'cost_price', 'sell_price', 'tax_rate', 'reorder_level',
-        'attributes', 'track_batches', 'track_serials', 'is_active',
+        'attributes', 'image_path', 'track_batches', 'track_serials', 'is_active',
     ];
 
     /**
@@ -76,6 +76,7 @@ class ProductModel extends Model
                       products.sku, products.barcode, products.name, products.brand,
                       products.unit, products.cost_price, products.sell_price,
                       products.tax_rate, products.reorder_level, products.attributes,
+                      products.image_path,
                       products.track_batches, products.track_serials, products.is_active,
                       categories.name AS category_name,
                       suppliers.name  AS supplier_name,

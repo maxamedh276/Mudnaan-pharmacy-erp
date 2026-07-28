@@ -253,6 +253,8 @@ INSERT INTO accounts (account_group_id, code, name, is_system)
   SELECT id, '4000', 'Sales Revenue',         1 FROM account_groups WHERE code='INC';
 INSERT INTO accounts (account_group_id, code, name, is_system)
   SELECT id, '4100', 'Other Income',          1 FROM account_groups WHERE code='INC';
+INSERT INTO accounts (account_group_id, code, name, is_system)
+  SELECT id, '4200', 'Sales Discounts',       1 FROM account_groups WHERE code='INC';
 -- Cost of Sales
 INSERT INTO accounts (account_group_id, code, name, is_system)
   SELECT id, '5000', 'Cost of Goods Sold',    1 FROM account_groups WHERE code='COS';

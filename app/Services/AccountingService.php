@@ -27,6 +27,7 @@ class AccountingService
     public const DEPOSITS        = '2200';
     public const OWNERS_CAPITAL  = '3000';
     public const REVENUE         = '4000';
+    public const SALES_DISCOUNT  = '4200';
     public const COGS            = '5000';
     public const GENERAL_EXPENSE = '6900';
 
@@ -39,13 +40,21 @@ class AccountingService
      *   CREDIT Sales Revenue (net) + Tax Payable
      *   DEBIT  COGS / CREDIT Inventory (at cost)
      */
-    public function postSale(array $sale, float $costOfGoods, int $branchId, ?int $userId): void
+    /**
+     * @param array $payments list of {method, amount, bank_account_id?} — the
+     *                        paid portion is debited to each payment's chosen
+     *                        money account (Cash on Hand, a till, a bank/wallet).
+     */
+    public function postSale(array $sale, array $payments, float $costOfGoods, int $branchId, ?int $userId): void
     {
         $unpaid = round($sale['grand_total'] - $sale['paid_total'], 2);
         $net    = round($sale['grand_total'] - $sale['tax_total'], 2);
 
         $lines = [
-            ['code' => self::CASH,        'debit'  => min($sale['paid_total'], $sale['grand_total'])],
+            // One debit per payment, routed to its money account. Capped at
+            // the sale total so cash overpayment (change given back) never
+            // inflates the books.
+            ...$this->moneyDebitLines($payments, min($sale['paid_total'], $sale['grand_total'])),
             ['code' => self::RECEIVABLE,  'debit'  => max($unpaid, 0)],
             ['code' => self::REVENUE,     'credit' => $net],
             ['code' => self::TAX_PAYABLE, 'credit' => $sale['tax_total']],
@@ -137,7 +146,10 @@ class AccountingService
 
         $lines = [
             ['code' => self::INVENTORY, 'debit'  => (float) $purchase['total']],
-            ['code' => self::CASH,      'credit' => $paidAmount],
+            [
+                'account_id' => $this->cashOrBankAccountId($purchase['bank_account_id'] ?? null, $purchase['method'] ?? 'cash'),
+                'credit'     => $paidAmount,
+            ],
             ['code' => self::PAYABLE,   'credit' => max($owed, 0)],
         ];
 
@@ -226,10 +238,15 @@ class AccountingService
     }
 
     /**
-     * Money received from a customer: DEBIT Cash/Bank / CREDIT AR.
+     * Money received from a customer: DEBIT Cash/Bank (received) +
+     * DEBIT Sales Discounts (any waived amount) / CREDIT AR (the full
+     * settled total). A zero discount drops its line automatically.
      */
     public function postCustomerReceipt(array $receipt, ?int $userId): void
     {
+        $amount   = (float) $receipt['amount'];
+        $discount = round((float) ($receipt['discount'] ?? 0), 2);
+
         $this->createEntry(
             branchId: (int) $receipt['branch_id'],
             entryDate: substr((string) $receipt['received_at'], 0, 10),
@@ -239,9 +256,10 @@ class AccountingService
             lines: [
                 [
                     'account_id' => $this->cashOrBankAccountId($receipt['bank_account_id'] ?? null, $receipt['method']),
-                    'debit'      => (float) $receipt['amount'],
+                    'debit'      => $amount,
                 ],
-                ['code' => self::RECEIVABLE, 'credit' => (float) $receipt['amount']],
+                ['code' => self::SALES_DISCOUNT, 'debit'  => $discount],
+                ['code' => self::RECEIVABLE,     'credit' => round($amount + $discount, 2)],
             ],
             userId: $userId,
         );
@@ -303,9 +321,54 @@ class AccountingService
     }
 
     /**
-     * Which GL account money physically hits: an explicit bank account
-     * wins; otherwise cash goes to Cash on Hand and every electronic
-     * method defaults to the built-in Bank Account.
+     * Splits an applied amount into one debit line per payment, each routed
+     * to the money account it landed in. Any shortfall (e.g. no payment rows
+     * but money was applied) falls back to Cash on Hand so the entry balances.
+     *
+     * @param array $payments list of {method, amount, bank_account_id?}
+     * @return list<array<string,mixed>>
+     */
+    private function moneyDebitLines(array $payments, float $applied): array
+    {
+        $applied = round($applied, 2);
+
+        if ($applied <= 0) {
+            return [];
+        }
+
+        $lines     = [];
+        $remaining = $applied;
+
+        foreach ($payments as $payment) {
+            if ($remaining <= 0) {
+                break;
+            }
+
+            $portion = min(round((float) ($payment['amount'] ?? 0), 2), $remaining);
+
+            if ($portion <= 0) {
+                continue;
+            }
+
+            $lines[]   = [
+                'account_id' => $this->cashOrBankAccountId($payment['bank_account_id'] ?? null, $payment['method']),
+                'debit'      => $portion,
+            ];
+            $remaining = round($remaining - $portion, 2);
+        }
+
+        if ($remaining > 0) {
+            $lines[] = ['code' => self::CASH, 'debit' => $remaining];
+        }
+
+        return $lines;
+    }
+
+    /**
+     * Which GL account money physically hits: an explicit money account
+     * (a cash till or a bank/wallet, by bank_accounts row id) wins;
+     * otherwise cash goes to Cash on Hand and every electronic method
+     * defaults to the built-in Bank Account.
      */
     public function cashOrBankAccountId(?int $bankAccountId, string $method): int
     {

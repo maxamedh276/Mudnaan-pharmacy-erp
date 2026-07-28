@@ -31,11 +31,30 @@ class SupplierModel extends Model
         $rows  = $builder->orderBy('name', 'ASC')
             ->findAll($perPage, ($page - 1) * $perPage);
 
-        foreach ($rows as &$row) {
-            $row['id']        = (int) $row['id'];
-            $row['is_active'] = (bool) $row['is_active'];
+        return ['items' => array_map([self::class, 'cast'], $rows), 'total' => $total];
+    }
+
+    public static function cast(array $supplier): array
+    {
+        $supplier['id']        = (int) $supplier['id'];
+        $supplier['is_active'] = (bool) ($supplier['is_active'] ?? true);
+
+        return $supplier;
+    }
+
+    /**
+     * True if another (non-deleted) supplier already uses this phone.
+     * Pass the supplier's own id as [$exceptId] when editing so it
+     * doesn't collide with itself.
+     */
+    public function phoneExists(string $phone, ?int $exceptId = null): bool
+    {
+        $builder = $this->where('deleted_at', null)->where('phone', $phone);
+
+        if ($exceptId !== null) {
+            $builder = $builder->where('id !=', $exceptId);
         }
 
-        return ['items' => $rows, 'total' => $total];
+        return $builder->countAllResults() > 0;
     }
 }

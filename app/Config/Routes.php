@@ -34,6 +34,7 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers'], static function (Ro
         $routes->post('products', 'Pos\ProductsController::create');
         $routes->get('products/(:num)', 'Pos\ProductsController::show/$1');
         $routes->put('products/(:num)', 'Pos\ProductsController::update/$1');
+        $routes->post('products/(:num)/image', 'Pos\ProductsController::uploadImage/$1');
         $routes->delete('products/(:num)', 'Pos\ProductsController::delete/$1');
         $routes->get('categories', 'Pos\CategoriesController::index');
         $routes->post('categories', 'Pos\CategoriesController::create');

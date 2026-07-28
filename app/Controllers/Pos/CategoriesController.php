@@ -19,13 +19,7 @@ class CategoriesController extends BaseApiController
             ->orderBy('name', 'ASC')
             ->findAll();
 
-        foreach ($categories as &$category) {
-            $category['id']        = (int) $category['id'];
-            $category['parent_id'] = $category['parent_id'] === null ? null : (int) $category['parent_id'];
-            $category['is_active'] = (bool) $category['is_active'];
-        }
-
-        return $this->respondData($categories);
+        return $this->respondData(array_map([CategoryModel::class, 'cast'], $categories));
     }
 
     public function create(): ResponseInterface
@@ -47,6 +41,6 @@ class CategoriesController extends BaseApiController
             'parent_id' => $body['parent_id'] ?? null,
         ]);
 
-        return $this->respondData($categoryModel->find($categoryId), 201);
+        return $this->respondData(CategoryModel::cast($categoryModel->find($categoryId)), 201);
     }
 }

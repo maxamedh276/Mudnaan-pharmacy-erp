@@ -193,14 +193,17 @@ class ReversalService
             $this->accounting->reverseSource('customer_receipt', $receiptId, $branchId, $userId);
         }
 
+        // The receipt cleared received + any waived discount off the due.
+        $settled = round((float) $receipt['amount'] + (float) ($receipt['discount'] ?? 0), 2);
+
         // Restore the invoice (and its linked sale) it settled.
         if (! empty($receipt['invoice_id'])) {
-            $this->rollBackInvoice((int) $receipt['invoice_id'], (float) $receipt['amount']);
+            $this->rollBackInvoice((int) $receipt['invoice_id'], $settled);
         }
 
         // Money in had reduced what the customer owed; undo that.
         $database->table('customers')->where('id', (int) $receipt['customer_id'])
-            ->set('balance', 'balance - ' . (float) $receipt['amount'], false)->update();
+            ->set('balance', 'balance - ' . $settled, false)->update();
 
         $database->table('customer_receipts')->where('id', $receiptId)->update([
             'status'      => 'cancelled',

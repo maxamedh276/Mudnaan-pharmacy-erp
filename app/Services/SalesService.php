@@ -142,10 +142,11 @@ class SalesService
 
         foreach ($payments as $payment) {
             $database->table('payments')->insert([
-                'sale_id'   => $saleId,
-                'method'    => $payment['method'],
-                'amount'    => $payment['amount'],
-                'reference' => $payment['reference'],
+                'sale_id'         => $saleId,
+                'method'          => $payment['method'],
+                'bank_account_id' => $payment['bank_account_id'],
+                'amount'          => $payment['amount'],
+                'reference'       => $payment['reference'],
             ]);
         }
 
@@ -176,7 +177,7 @@ class SalesService
         }
 
         if ($plan === 'premium') {
-            $this->accounting->postSale($sale, $costOfGoods, $branchId, $userId);
+            $this->accounting->postSale($sale, $payments, $costOfGoods, $branchId, $userId);
         }
 
         return $saleId;
@@ -262,9 +263,12 @@ class SalesService
             }
 
             $payments[] = [
-                'method'    => $method,
-                'amount'    => $amount,
-                'reference' => $payment['reference'] ?? null,
+                'method'          => $method,
+                'amount'          => $amount,
+                'bank_account_id' => isset($payment['bank_account_id']) && (int) $payment['bank_account_id'] > 0
+                    ? (int) $payment['bank_account_id']
+                    : null,
+                'reference'       => $payment['reference'] ?? null,
             ];
         }
 

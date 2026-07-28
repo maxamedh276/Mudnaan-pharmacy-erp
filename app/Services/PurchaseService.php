@@ -22,8 +22,8 @@ class PurchaseService
     }
 
     /**
-     * @param array $data {supplier_id?, reference_no?, paid_amount?,
-     *                     items: [{product_id, quantity, unit_cost?}]}
+     * @param array $data {supplier_id?, reference_no?, paid_amount?, method?,
+     *                     bank_account_id?, items: [{product_id, quantity, unit_cost?}]}
      */
     public function createPurchase(array $data, int $branchId, int $userId, string $plan): array
     {
@@ -67,17 +67,29 @@ class PurchaseService
         // Unless told otherwise, the purchase is paid in full on receipt.
         $paidAmount = round((float) ($data['paid_amount'] ?? $total), 2);
 
+        $method = $data['method'] ?? 'cash';
+
+        if (! in_array($method, ['cash', 'card', 'mobile_money', 'bank', 'cheque'], true)) {
+            throw new InvalidArgumentException('INVALID_PAYMENT_METHOD');
+        }
+
+        $bankAccountId = isset($data['bank_account_id']) && (int) $data['bank_account_id'] > 0
+            ? (int) $data['bank_account_id']
+            : null;
+
         $database = db_connect();
         $database->transException(true)->transStart();
 
         $purchaseId = (int) $this->purchases->insert([
-            'branch_id'    => $branchId,
-            'supplier_id'  => $data['supplier_id'] ?? null,
-            'user_id'      => $userId,
-            'reference_no' => $data['reference_no'] ?? null,
-            'total'        => $total,
-            'status'       => 'received',
-            'purchased_at' => $data['purchased_at'] ?? date('Y-m-d H:i:s'),
+            'branch_id'       => $branchId,
+            'supplier_id'     => $data['supplier_id'] ?? null,
+            'user_id'         => $userId,
+            'reference_no'    => $data['reference_no'] ?? null,
+            'total'           => $total,
+            'status'          => 'received',
+            'method'          => $method,
+            'bank_account_id' => $bankAccountId,
+            'purchased_at'    => $data['purchased_at'] ?? date('Y-m-d H:i:s'),
         ]);
 
         foreach ($itemRows as $index => $itemRow) {

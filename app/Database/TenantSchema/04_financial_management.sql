@@ -73,15 +73,21 @@ CREATE TABLE financial_periods (
 --  Each row is mirrored by ONE postable GL account (account_id), so
 --  the money in the bank is always readable from the journal.
 -- ==================================================================
+-- Despite the name this is the app's whole "money accounts" registry:
+-- cash tills/drawers AND banks/mobile-money wallets, distinguished by
+-- `type`. Every money form (sales, purchases, supplier payments,
+-- receipts, deposits) picks the exact account cash lands in from here.
 CREATE TABLE bank_accounts (
   id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  account_id      BIGINT UNSIGNED NOT NULL,   -- the GL account backing this bank
-  name            VARCHAR(120) NOT NULL,      -- e.g. 'Salaam Bank - USD'
+  account_id      BIGINT UNSIGNED NOT NULL,   -- the GL account backing this money account
+  type            ENUM('cash','card','mobile_money','bank') NOT NULL DEFAULT 'bank',
+  name            VARCHAR(120) NOT NULL,      -- e.g. 'Salaam Bank - USD' / 'Main Till'
   bank_name       VARCHAR(120) NULL,
   account_number  VARCHAR(60)  NULL,
   currency        VARCHAR(10)  NOT NULL DEFAULT 'USD',
   opening_balance DECIMAL(14,2) NOT NULL DEFAULT 0.00,
   is_active       TINYINT(1)   NOT NULL DEFAULT 1,
+  is_system       TINYINT(1)   NOT NULL DEFAULT 0,  -- built-in Cash/Bank: undeletable
   created_at      TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at      TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_at      TIMESTAMP    NULL DEFAULT NULL,
@@ -89,6 +95,20 @@ CREATE TABLE bank_accounts (
   UNIQUE KEY uq_bank_gl_account (account_id),
   CONSTRAINT fk_bank_account FOREIGN KEY (account_id) REFERENCES accounts (id)
 ) ENGINE=InnoDB;
+
+-- The built-in Cash on Hand (1000) and Bank (1010) accounts become the
+-- default selectable money accounts (a fresh tenant's first till/bank).
+INSERT INTO bank_accounts (account_id, type, name, currency, opening_balance, is_active, is_system)
+SELECT id, 'cash', 'Cash on Hand', 'USD', 0.00, 1, 1 FROM accounts WHERE code = '1000';
+INSERT INTO bank_accounts (account_id, type, name, currency, opening_balance, is_active, is_system)
+SELECT id, 'bank', 'Bank',         'USD', 0.00, 1, 1 FROM accounts WHERE code = '1010';
+
+-- Sale payments and purchases reference a money account too (added here,
+-- after bank_accounts exists, since those tables live in 01_*).
+ALTER TABLE payments
+  ADD CONSTRAINT fk_pay_bank FOREIGN KEY (bank_account_id) REFERENCES bank_accounts (id);
+ALTER TABLE purchases
+  ADD CONSTRAINT fk_pur_bank FOREIGN KEY (bank_account_id) REFERENCES bank_accounts (id);
 
 
 -- ==================================================================
@@ -235,6 +255,7 @@ CREATE TABLE customer_receipts (
   method          ENUM('cash','card','mobile_money','bank','cheque') NOT NULL DEFAULT 'cash',
   bank_account_id BIGINT UNSIGNED NULL,
   amount          DECIMAL(14,2) NOT NULL,
+  discount        DECIMAL(14,2) NOT NULL DEFAULT 0.00,  -- settlement discount waived off the due
   reference       VARCHAR(120) NULL,
   notes           VARCHAR(255) NULL,
   received_at     TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,

@@ -373,6 +373,16 @@ class ReceivablesService
             throw new InvalidArgumentException('INVALID_PAYMENT_METHOD');
         }
 
+        // A settlement discount waives part of the due; the customer's
+        // balance clears by the full settled amount (received + waived).
+        $discount = round((float) ($data['discount'] ?? 0), 2);
+
+        if ($discount < 0) {
+            throw new InvalidArgumentException('INVALID_AMOUNT');
+        }
+
+        $settled = round($amount + $discount, 2);
+
         $database  = db_connect();
         $invoiceId = isset($data['invoice_id']) ? (int) $data['invoice_id'] : null;
         $invoice   = null;
@@ -395,7 +405,7 @@ class ReceivablesService
 
             $outstanding = round($invoice['total'] - $invoice['paid_total'], 2);
 
-            if ($amount > $outstanding) {
+            if ($settled > $outstanding) {
                 throw new InvalidArgumentException('OVERPAYMENT');
             }
         }
@@ -404,6 +414,17 @@ class ReceivablesService
 
         if ($customerId <= 0) {
             throw new InvalidArgumentException('CUSTOMER_REQUIRED');
+        }
+
+        // On-account: a discount can't waive more than the customer owes.
+        if ($invoice === null && $discount > 0) {
+            $balance     = (float) ($database->table('customers')->where('id', $customerId)
+                ->get()->getRowArray()['balance'] ?? 0);
+            $outstanding = max(0, round(-$balance, 2));
+
+            if ($settled > $outstanding + 0.001) {
+                throw new InvalidArgumentException('OVERPAYMENT');
+            }
         }
 
         $database->transException(true)->transStart();
@@ -416,6 +437,7 @@ class ReceivablesService
             'method'          => $method,
             'bank_account_id' => $data['bank_account_id'] ?? null,
             'amount'          => $amount,
+            'discount'        => $discount,
             'reference'       => $data['reference'] ?? null,
             'notes'           => $data['notes'] ?? null,
             'created_by'      => $userId,
@@ -426,7 +448,7 @@ class ReceivablesService
             ->update(['receipt_no' => 'RCV-' . str_pad((string) $receiptId, 5, '0', STR_PAD_LEFT)]);
 
         if ($invoice !== null) {
-            $newPaid = round($invoice['paid_total'] + $amount, 2);
+            $newPaid = round($invoice['paid_total'] + $settled, 2);
             $database->table('customer_invoices')->where('id', $invoiceId)->update([
                 'paid_total' => $newPaid,
                 'status'     => $newPaid >= (float) $invoice['total'] ? 'paid' : 'partial',
@@ -441,9 +463,9 @@ class ReceivablesService
             }
         }
 
-        // Money in = the customer owes less.
+        // Money in (plus any waived discount) = the customer owes less.
         $database->table('customers')->where('id', $customerId)
-            ->set('balance', 'balance + ' . $amount, false)->update();
+            ->set('balance', 'balance + ' . $settled, false)->update();
 
         if ($plan === 'premium') {
             $receipt = $database->table('customer_receipts')->where('id', $receiptId)->get()->getRowArray();

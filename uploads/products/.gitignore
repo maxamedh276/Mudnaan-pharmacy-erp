@@ -1,0 +1,4 @@
+# Runtime-uploaded product images are user data, not code.
+*
+!.gitignore
+!index.html

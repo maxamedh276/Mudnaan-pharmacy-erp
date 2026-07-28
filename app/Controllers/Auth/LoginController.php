@@ -7,6 +7,7 @@ use App\Libraries\AuthContext;
 use App\Libraries\JwtService;
 use App\Libraries\TenantManager;
 use App\Models\UserModel;
+use App\Services\AuditService;
 use CodeIgniter\HTTP\ResponseInterface;
 use Config\Tenants;
 
@@ -46,10 +47,17 @@ class LoginController extends BaseApiController
         $user      = $userModel->findActiveByIdentity($identity);
 
         if ($user === null || ! password_verify($password, $user->password_hash)) {
+            // Traceable failed attempt (no actor — bad credentials).
+            AuditService::log('auth.login_failed', 'auth', 'users', null, details: ['identity' => $identity]);
+
             return $this->respondError('INVALID_CREDENTIALS', 'Wrong email/phone or password.', 401);
         }
 
         $userModel->update($user->id, ['last_login_at' => date('Y-m-d H:i:s')]);
+
+        // Attribute the login to this user, then record it on the trail.
+        AuthContext::$user = $user;
+        AuditService::log('auth.login', 'auth', 'users', (int) $user->id);
 
         $token = (new JwtService())->issue((int) $user->id, $tenant['code'], $tenant['plan'], $user->role_name);
 
@@ -92,6 +100,8 @@ class LoginController extends BaseApiController
      */
     public function logout(): ResponseInterface
     {
+        AuditService::log('auth.logout', 'auth', 'users', AuthContext::userId());
+
         return $this->respondData(['message' => 'Logged out.']);
     }
 

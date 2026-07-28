@@ -62,7 +62,7 @@ class SuppliersController extends BaseApiController
 
         return $supplier === null
             ? $this->respondNotFound('Supplier')
-            : $this->respondData($supplier);
+            : $this->respondData(SupplierModel::cast($supplier));
     }
 
     public function create(): ResponseInterface
@@ -78,14 +78,20 @@ class SuppliersController extends BaseApiController
         }
 
         $supplierModel = new SupplierModel();
-        $supplierId    = $supplierModel->insert([
+        $phone         = trim((string) ($body['phone'] ?? ''));
+
+        if ($phone !== '' && $supplierModel->phoneExists($phone)) {
+            return $this->respondError('DUPLICATE_PHONE', 'A supplier with this phone number already exists.', 422);
+        }
+
+        $supplierId = $supplierModel->insert([
             'name'    => trim($body['name']),
-            'phone'   => $body['phone'] ?? null,
+            'phone'   => $phone === '' ? null : $phone,
             'email'   => $body['email'] ?? null,
             'address' => $body['address'] ?? null,
         ]);
 
-        return $this->respondData($supplierModel->find($supplierId), 201);
+        return $this->respondData(SupplierModel::cast($supplierModel->find($supplierId)), 201);
     }
 
     public function update(int $supplierId): ResponseInterface
@@ -103,11 +109,21 @@ class SuppliersController extends BaseApiController
         $body   = $this->body();
         $fields = array_intersect_key($body, array_flip(['name', 'phone', 'email', 'address', 'is_active']));
 
+        if (array_key_exists('phone', $fields)) {
+            $phone = trim((string) $fields['phone']);
+
+            if ($phone !== '' && $supplierModel->phoneExists($phone, $supplierId)) {
+                return $this->respondError('DUPLICATE_PHONE', 'A supplier with this phone number already exists.', 422);
+            }
+
+            $fields['phone'] = $phone === '' ? null : $phone;
+        }
+
         if ($fields !== []) {
             $supplierModel->update($supplierId, $fields);
         }
 
-        return $this->respondData($supplierModel->find($supplierId));
+        return $this->respondData(SupplierModel::cast($supplierModel->find($supplierId)));
     }
 
     public function delete(int $supplierId): ResponseInterface

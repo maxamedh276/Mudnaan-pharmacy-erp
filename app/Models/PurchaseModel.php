@@ -13,7 +13,7 @@ class PurchaseModel extends Model
     protected $updatedField  = '';        // table has no updated_at column
     protected $allowedFields = [
         'branch_id', 'supplier_id', 'user_id', 'reference_no',
-        'total', 'status', 'purchased_at',
+        'total', 'status', 'method', 'bank_account_id', 'purchased_at',
     ];
 
     public function listPurchases(int $branchId, array $filters, int $page, int $perPage): array

@@ -89,6 +89,14 @@ class AuditLogController extends BaseApiController
 
         $database = db_connect();
 
+        $users = $database->table('audit_log')
+            ->distinct()
+            ->select('audit_log.user_id, users.name AS user_name')
+            ->join('users', 'users.id = audit_log.user_id', 'left')
+            ->where('audit_log.user_id IS NOT NULL')
+            ->orderBy('users.name')
+            ->get()->getResultArray();
+
         return $this->respondData([
             'modules' => array_column($database->table('audit_log')
                 ->distinct()->select('module')->where('module IS NOT NULL')
@@ -96,6 +104,10 @@ class AuditLogController extends BaseApiController
             'actions' => array_column($database->table('audit_log')
                 ->distinct()->select('action')->orderBy('action')
                 ->get()->getResultArray(), 'action'),
+            'users' => array_map(static fn ($u) => [
+                'id'   => (int) $u['user_id'],
+                'name' => $u['user_name'] ?? ('#' . $u['user_id']),
+            ], $users),
         ]);
     }
 
