@@ -9,9 +9,10 @@ use InvalidArgumentException;
  * ACCOUNTS PAYABLE — supplier bills and the payments that settle them.
  *
  * Two ways a bill is born:
- *  1. AUTOMATICALLY from a purchase that wasn't fully paid
- *     (PurchaseService calls createFromPurchase; no journal posting —
- *     the purchase already posted Inventory / Cash + AP).
+ *  1. AUTOMATICALLY from goods actually received against a purchase
+ *     order (PurchaseReceiptService calls growBillFromReceipt on every
+ *     receipt; no journal posting here — the receipt already posted
+ *     Inventory / AP for that value).
  *  2. STANDALONE for services (rent, utilities, freight …): posts
  *     DEBIT General Expense / CREDIT Accounts Payable.
  *
@@ -244,36 +245,59 @@ class PayablesService
     }
 
     /**
-     * Called by PurchaseService inside its transaction: mirrors the
-     * unpaid part of a purchase as a payable document. NO posting here.
+     * Called by PurchaseReceiptService inside its transaction: the
+     * supplier only becomes payable for what has actually been
+     * received, so a bill is created on the first receipt and grown by
+     * the value of every later receipt against the same purchase order.
+     * NO posting here — the receipt's own posting already covered
+     * Inventory / AP for this value.
      */
-    public function createFromPurchase(array $purchase, float $paidAmount, int $userId): int
+    public function growBillFromReceipt(array $purchase, array $receipt, float $value, int $userId): int
     {
         $database = db_connect();
 
-        $database->table('supplier_bills')->insert([
-            'uuid'        => Uuid::v4(),
-            'branch_id'   => $purchase['branch_id'],
-            'supplier_id' => $purchase['supplier_id'],
-            'purchase_id' => $purchase['id'],
-            'bill_no'     => $purchase['reference_no'] ?: null,
-            'bill_date'   => substr((string) $purchase['purchased_at'], 0, 10),
-            'subtotal'    => $purchase['total'],
-            'total'       => $purchase['total'],
-            'paid_total'  => $paidAmount,
-            'status'      => $paidAmount > 0 ? 'partial' : 'unpaid',
-            'notes'       => 'Auto-created from purchase #' . $purchase['id'],
-            'created_by'  => $userId,
-        ]);
+        $bill = $database->table('supplier_bills')
+            ->where('purchase_id', $purchase['id'])
+            ->where('deleted_at', null)
+            ->get()
+            ->getRowArray();
 
-        $billId = (int) $database->insertID();
+        if ($bill === null) {
+            $database->table('supplier_bills')->insert([
+                'uuid'        => Uuid::v4(),
+                'branch_id'   => $purchase['branch_id'],
+                'supplier_id' => $purchase['supplier_id'],
+                'purchase_id' => $purchase['id'],
+                'bill_no'     => $purchase['reference_no'] ?: null,
+                'bill_date'   => substr((string) $receipt['received_at'], 0, 10),
+                'subtotal'    => $value,
+                'total'       => $value,
+                'paid_total'  => 0,
+                'status'      => 'unpaid',
+                'notes'       => 'Auto-created from purchase #' . $purchase['id'],
+                'created_by'  => $userId,
+            ]);
 
-        if (empty($purchase['reference_no'])) {
-            $database->table('supplier_bills')->where('id', $billId)
-                ->update(['bill_no' => 'BILL-' . str_pad((string) $billId, 5, '0', STR_PAD_LEFT)]);
+            $billId = (int) $database->insertID();
+
+            if (empty($purchase['reference_no'])) {
+                $database->table('supplier_bills')->where('id', $billId)
+                    ->update(['bill_no' => 'BILL-' . str_pad((string) $billId, 5, '0', STR_PAD_LEFT)]);
+            }
+
+            return $billId;
         }
 
-        return $billId;
+        $newTotal  = round((float) $bill['total'] + $value, 2);
+        $paidTotal = (float) $bill['paid_total'];
+
+        $database->table('supplier_bills')->where('id', $bill['id'])->update([
+            'subtotal' => $newTotal,
+            'total'    => $newTotal,
+            'status'   => $paidTotal >= $newTotal ? 'paid' : ($paidTotal > 0 ? 'partial' : 'unpaid'),
+        ]);
+
+        return (int) $bill['id'];
     }
 
     /**

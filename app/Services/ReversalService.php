@@ -18,17 +18,19 @@ class ReversalService
 {
     public function __construct(
         private readonly AccountingService $accounting = new AccountingService(),
-        private readonly InventoryService $inventory = new InventoryService(),
     ) {
     }
 
     /**
-     * Voids a purchase after proving nothing depends on it:
-     *   - its stock hasn't been sold (reversing wouldn't go negative),
-     *   - its bill has no payments,
-     *   - it isn't in a closed period.
+     * Cancels a purchase order. Since creating a PO books nothing (no
+     * stock, no GL, no bill — see PurchaseService), voiding one is only
+     * ever a status flip: it's only allowed while still 'pending', i.e.
+     * before any goods have been received against it. A PO with any
+     * receipts already carries real stock/GL/payable impact that voiding
+     * doesn't currently unwind — receive against it (or leave it as a
+     * standing partial order) instead of cancelling.
      */
-    public function voidPurchase(int $purchaseId, int $branchId, string $reason, int $userId, string $plan): array
+    public function voidPurchase(int $purchaseId, int $branchId, string $reason, int $userId): array
     {
         $database = db_connect();
 
@@ -42,70 +44,19 @@ class ReversalService
         if ($purchase['status'] === 'cancelled') {
             throw new InvalidArgumentException('ALREADY_CANCELLED');
         }
-        $this->assertPeriodOpen(substr((string) $purchase['purchased_at'], 0, 10));
-
-        // Dependency: the stock this purchase added must still be on hand.
-        $items = $database->table('purchase_items')
-            ->where('purchase_id', $purchaseId)->get()->getResultArray();
-
-        foreach ($items as $item) {
-            $onHand = $this->inventory->currentQuantity($branchId, (int) $item['product_id']);
-            if ($onHand < (float) $item['quantity']) {
-                throw new InvalidArgumentException('ITEMS_SOLD');
-            }
-        }
-
-        // Dependency: no payments against the auto-created bill.
-        $bill = $database->table('supplier_bills')
-            ->where('purchase_id', $purchaseId)->where('deleted_at', null)
-            ->get()->getRowArray();
-
-        if ($bill !== null) {
-            $paidByDocuments = (float) ($database->table('supplier_payments')
-                ->selectSum('amount')
-                ->where('bill_id', $bill['id'])->where('status', 'active')
-                ->get()->getRow()->amount ?? 0);
-
-            if ($paidByDocuments > 0) {
-                throw new InvalidArgumentException('HAS_PAYMENTS');
-            }
-        }
-
-        $database->transException(true)->transStart();
-
-        // Put the stock back (negative movements).
-        foreach ($items as $item) {
-            $this->inventory->recordMovement(
-                $branchId,
-                (int) $item['product_id'],
-                -(float) $item['quantity'],
-                'adjustment',
-                'purchase_reversal',
-                $purchaseId,
-                $userId,
-            );
-        }
-
-        if ($plan === 'premium') {
-            $this->accounting->reverseSource('purchase', $purchaseId, $branchId, $userId);
-        }
-
-        if ($bill !== null) {
-            $database->table('supplier_bills')->where('id', $bill['id'])
-                ->update(['status' => 'cancelled']);
+        if ($purchase['status'] !== 'pending') {
+            throw new InvalidArgumentException('ALREADY_RECEIVING');
         }
 
         $database->table('purchases')->where('id', $purchaseId)
             ->update(['status' => 'cancelled']);
-
-        $database->transComplete();
 
         AuditService::log(
             'purchase.void',
             'purchases',
             'purchases',
             $purchaseId,
-            before: ['status' => $purchase['status'], 'total' => $purchase['total']],
+            before: ['status' => $purchase['status']],
             after: ['status' => 'cancelled'],
             details: ['reason' => $reason],
         );

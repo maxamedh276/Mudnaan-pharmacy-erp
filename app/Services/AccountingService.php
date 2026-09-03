@@ -137,29 +137,30 @@ class AccountingService
     }
 
     /**
-     * A received purchase: DEBIT Inventory / CREDIT Cash (paid) +
-     * Accounts Payable (owed).
+     * Goods physically received against a purchase order:
+     *   DEBIT Inventory (received value) / CREDIT Accounts Payable.
+     *
+     * Payment is a wholly separate later event (a Supplier Payment
+     * against the bill this creates), so no cash/bank line is posted
+     * here — the full received value becomes payable. Ordering a
+     * purchase never posts anything; only a receipt does.
      */
-    public function postPurchase(array $purchase, float $paidAmount, int $branchId, ?int $userId): void
+    public function postPurchaseReceipt(array $receipt, float $value, int $branchId, ?int $userId): void
     {
-        $owed = round($purchase['total'] - $paidAmount, 2);
-
-        $lines = [
-            ['code' => self::INVENTORY, 'debit'  => (float) $purchase['total']],
-            [
-                'account_id' => $this->cashOrBankAccountId($purchase['bank_account_id'] ?? null, $purchase['method'] ?? 'cash'),
-                'credit'     => $paidAmount,
-            ],
-            ['code' => self::PAYABLE,   'credit' => max($owed, 0)],
-        ];
+        if ($value <= 0) {
+            return;
+        }
 
         $this->createEntry(
             branchId: $branchId,
-            entryDate: substr((string) $purchase['purchased_at'], 0, 10),
-            description: 'Purchase ' . ($purchase['reference_no'] ?: '#' . $purchase['id']),
-            sourceType: 'purchase',
-            sourceId: (int) $purchase['id'],
-            lines: $lines,
+            entryDate: substr((string) $receipt['received_at'], 0, 10),
+            description: 'Goods received ' . ($receipt['receipt_no'] ?: '#' . $receipt['id']),
+            sourceType: 'purchase_receipt',
+            sourceId: (int) $receipt['id'],
+            lines: [
+                ['code' => self::INVENTORY, 'debit'  => $value],
+                ['code' => self::PAYABLE,   'credit' => $value],
+            ],
             userId: $userId,
         );
     }

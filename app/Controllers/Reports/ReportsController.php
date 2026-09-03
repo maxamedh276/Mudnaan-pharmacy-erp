@@ -218,7 +218,7 @@ class ReportsController extends BaseApiController
             return $denied;
         }
 
-        return $this->respondData((new ReportService())->customerBalances());
+        return $this->respondData((new ReportService())->customerBalances($this->request->getGet('q')));
     }
 
     public function customerAging(): ResponseInterface
@@ -227,7 +227,9 @@ class ReportsController extends BaseApiController
             return $denied;
         }
 
-        return $this->respondData((new ReportService())->customerAging($this->branchId()));
+        return $this->respondData(
+            (new ReportService())->customerAging($this->branchId(), $this->request->getGet('q')),
+        );
     }
 
     public function topCustomers(): ResponseInterface
@@ -238,7 +240,9 @@ class ReportsController extends BaseApiController
 
         [$from, $to] = $this->range();
 
-        return $this->respondData((new ReportService())->topCustomers($this->branchId(), $from, $to));
+        return $this->respondData(
+            (new ReportService())->topCustomers($this->branchId(), $from, $to, $this->request->getGet('q')),
+        );
     }
 
     public function supplierBalances(): ResponseInterface
@@ -247,7 +251,9 @@ class ReportsController extends BaseApiController
             return $denied;
         }
 
-        return $this->respondData((new ReportService())->supplierBalances($this->branchId()));
+        return $this->respondData(
+            (new ReportService())->supplierBalances($this->branchId(), $this->request->getGet('q')),
+        );
     }
 
     public function supplierAging(): ResponseInterface
@@ -256,7 +262,9 @@ class ReportsController extends BaseApiController
             return $denied;
         }
 
-        return $this->respondData((new ReportService())->supplierAging($this->branchId()));
+        return $this->respondData(
+            (new ReportService())->supplierAging($this->branchId(), $this->request->getGet('q')),
+        );
     }
 
     public function topSuppliers(): ResponseInterface
@@ -267,6 +275,8 @@ class ReportsController extends BaseApiController
 
         [$from, $to] = $this->range();
 
-        return $this->respondData((new ReportService())->topSuppliers($this->branchId(), $from, $to));
+        return $this->respondData(
+            (new ReportService())->topSuppliers($this->branchId(), $from, $to, $this->request->getGet('q')),
+        );
     }
 }

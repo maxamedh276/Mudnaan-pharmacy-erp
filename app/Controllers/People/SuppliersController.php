@@ -58,11 +58,12 @@ class SuppliersController extends BaseApiController
             return $denied;
         }
 
-        $supplier = (new SupplierModel())->find($supplierId);
+        $supplierModel = new SupplierModel();
+        $supplier      = $supplierModel->find($supplierId);
 
         return $supplier === null
             ? $this->respondNotFound('Supplier')
-            : $this->respondData(SupplierModel::cast($supplier));
+            : $this->respondData(SupplierModel::cast($supplierModel->withBalances([$supplier])[0]));
     }
 
     public function create(): ResponseInterface
@@ -91,7 +92,10 @@ class SuppliersController extends BaseApiController
             'address' => $body['address'] ?? null,
         ]);
 
-        return $this->respondData(SupplierModel::cast($supplierModel->find($supplierId)), 201);
+        return $this->respondData(
+            SupplierModel::cast($supplierModel->withBalances([$supplierModel->find($supplierId)])[0]),
+            201,
+        );
     }
 
     public function update(int $supplierId): ResponseInterface
@@ -123,7 +127,9 @@ class SuppliersController extends BaseApiController
             $supplierModel->update($supplierId, $fields);
         }
 
-        return $this->respondData(SupplierModel::cast($supplierModel->find($supplierId)));
+        return $this->respondData(
+            SupplierModel::cast($supplierModel->withBalances([$supplierModel->find($supplierId)])[0]),
+        );
     }
 
     public function delete(int $supplierId): ResponseInterface

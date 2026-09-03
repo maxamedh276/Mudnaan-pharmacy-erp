@@ -328,14 +328,20 @@ class ReportService
     //  CUSTOMER / SUPPLIER REPORTS
     // ================================================================
 
-    /** Customer balances (owed positive). */
-    public function customerBalances(): array
+    /** Customer balances (owed positive). Optionally filtered by name/phone. */
+    public function customerBalances(?string $q = null): array
     {
-        $rows = db_connect()->query(
-            "SELECT name, phone, -balance AS owed
-             FROM customers WHERE deleted_at IS NULL
-             ORDER BY owed DESC",
-        )->getResultArray();
+        $sql    = "SELECT name, phone, -balance AS owed
+             FROM customers WHERE deleted_at IS NULL";
+        $params = [];
+
+        if ($q !== null && $q !== '') {
+            $sql   .= ' AND (name LIKE ? OR phone LIKE ?)';
+            $like   = '%' . $q . '%';
+            $params = [$like, $like];
+        }
+
+        $rows = db_connect()->query($sql . ' ORDER BY owed DESC', $params)->getResultArray();
 
         foreach ($rows as &$row) {
             $row['owed'] = round((float) $row['owed'], 2);
@@ -345,34 +351,61 @@ class ReportService
     }
 
     /** Aging of unpaid customer invoices bucketed by age. */
-    public function customerAging(int $branchId): array
+    public function customerAging(int $branchId, ?string $q = null): array
     {
-        return $this->aging('customer_invoices', 'customer_id', 'customers', 'invoice_date', $branchId);
+        return $this->aging('customer_invoices', 'customer_id', 'customers', 'invoice_date', $branchId, $q);
     }
 
     /** Top customers by sales value over a period. */
-    public function topCustomers(int $branchId, string $from, string $to): array
+    public function topCustomers(int $branchId, string $from, string $to, ?string $q = null): array
     {
         return $this->groupedSales($branchId, $from, $to,
             "COALESCE(c.name, 'Walk-in Customer') AS label",
             'LEFT JOIN customers c ON c.id = s.customer_id',
-            'label', limit: 10);
+            'label', limit: 10, searchColumn: 'c.name', q: $q);
     }
 
-    /** Supplier balances (payable positive). */
-    public function supplierBalances(int $branchId): array
+    /**
+     * Supplier balances (payable positive). Optionally filtered by
+     * name/phone.
+     *
+     * Computed as billed minus paid — NOT as a sum of each bill's own
+     * (total - paid_total) — because a payment can be recorded
+     * on-account (no bill_id) without ever reducing a specific bill's
+     * paid_total; billed-minus-paid stays correct either way. Mirrors
+     * SupplierModel::withBalances() so this report and the supplier
+     * payment picker never disagree.
+     */
+    public function supplierBalances(int $branchId, ?string $q = null): array
     {
+        $params       = [$branchId, $branchId];
+        $searchClause = '';
+
+        if ($q !== null && $q !== '') {
+            $searchClause = ' AND (s.name LIKE ? OR s.phone LIKE ?)';
+            $like         = '%' . $q . '%';
+            $params[]     = $like;
+            $params[]     = $like;
+        }
+
         $rows = db_connect()->query(
             "SELECT s.name, s.phone,
-                    COALESCE(SUM(b.total - b.paid_total), 0) AS payable
+                    COALESCE(billed.total, 0) - COALESCE(paid.total, 0) AS payable
              FROM suppliers s
-             LEFT JOIN supplier_bills b ON b.supplier_id = s.id
-                  AND b.branch_id = ? AND b.deleted_at IS NULL AND b.status != 'cancelled'
-             WHERE s.deleted_at IS NULL
-             GROUP BY s.id, s.name, s.phone
+             LEFT JOIN (
+                 SELECT supplier_id, SUM(total) AS total FROM supplier_bills
+                 WHERE branch_id = ? AND deleted_at IS NULL AND status != 'cancelled'
+                 GROUP BY supplier_id
+             ) billed ON billed.supplier_id = s.id
+             LEFT JOIN (
+                 SELECT supplier_id, SUM(amount) AS total FROM supplier_payments
+                 WHERE branch_id = ? AND status = 'active'
+                 GROUP BY supplier_id
+             ) paid ON paid.supplier_id = s.id
+             WHERE s.deleted_at IS NULL$searchClause
              HAVING payable <> 0
              ORDER BY payable DESC",
-            [$branchId],
+            $params,
         )->getResultArray();
 
         foreach ($rows as &$row) {
@@ -383,24 +416,32 @@ class ReportService
     }
 
     /** Aging of unpaid supplier bills bucketed by age. */
-    public function supplierAging(int $branchId): array
+    public function supplierAging(int $branchId, ?string $q = null): array
     {
-        return $this->aging('supplier_bills', 'supplier_id', 'suppliers', 'bill_date', $branchId);
+        return $this->aging('supplier_bills', 'supplier_id', 'suppliers', 'bill_date', $branchId, $q);
     }
 
     /** Top suppliers by purchase value over a period. */
-    public function topSuppliers(int $branchId, string $from, string $to): array
+    public function topSuppliers(int $branchId, string $from, string $to, ?string $q = null): array
     {
+        $params       = [$branchId, $from, $to];
+        $searchClause = '';
+
+        if ($q !== null && $q !== '') {
+            $searchClause = ' AND sup.name LIKE ?';
+            $params[]     = '%' . $q . '%';
+        }
+
         $rows = db_connect()->query(
             "SELECT sup.name AS label, COALESCE(SUM(p.total), 0) AS total
              FROM purchases p
              JOIN suppliers sup ON sup.id = p.supplier_id
              WHERE p.branch_id = ? AND p.status != 'cancelled'
-               AND p.purchased_at >= ? AND p.purchased_at < ? + INTERVAL 1 DAY
+               AND p.purchased_at >= ? AND p.purchased_at < ? + INTERVAL 1 DAY$searchClause
              GROUP BY sup.id, sup.name
              ORDER BY total DESC
              LIMIT 10",
-            [$branchId, $from, $to],
+            $params,
         )->getResultArray();
 
         foreach ($rows as &$row) {
@@ -418,8 +459,17 @@ class ReportService
         string $join,
         string $groupBy,
         int $limit = 0,
+        ?string $searchColumn = null,
+        ?string $q = null,
     ): array {
-        $limitClause = $limit > 0 ? ' LIMIT ' . $limit : '';
+        $limitClause  = $limit > 0 ? ' LIMIT ' . $limit : '';
+        $params       = [$branchId, $from, $to];
+        $searchClause = '';
+
+        if ($searchColumn !== null && $q !== null && $q !== '') {
+            $searchClause = " AND $searchColumn LIKE ?";
+            $params[]     = '%' . $q . '%';
+        }
 
         $rows = db_connect()->query(
             "SELECT $labelExpr, COUNT(*) AS transactions,
@@ -427,10 +477,10 @@ class ReportService
              FROM sales s
              $join
              WHERE s.branch_id = ? AND s.status IN ('completed','partial')
-               AND s.sold_at >= ? AND s.sold_at < ? + INTERVAL 1 DAY
+               AND s.sold_at >= ? AND s.sold_at < ? + INTERVAL 1 DAY$searchClause
              GROUP BY $groupBy
              ORDER BY total DESC" . $limitClause,
-            [$branchId, $from, $to],
+            $params,
         )->getResultArray();
 
         foreach ($rows as &$row) {
@@ -444,8 +494,22 @@ class ReportService
     /**
      * Shared aging bucketer for receivable/payable documents.
      */
-    private function aging(string $table, string $partyKey, string $partyTable, string $dateCol, int $branchId): array
-    {
+    private function aging(
+        string $table,
+        string $partyKey,
+        string $partyTable,
+        string $dateCol,
+        int $branchId,
+        ?string $q = null,
+    ): array {
+        $params       = [$branchId];
+        $searchClause = '';
+
+        if ($q !== null && $q !== '') {
+            $searchClause = ' AND party.name LIKE ?';
+            $params[]     = '%' . $q . '%';
+        }
+
         $rows = db_connect()->query(
             "SELECT party.name AS label,
                     SUM(CASE WHEN DATEDIFF(CURDATE(), d.$dateCol) <= 30 THEN d.total - d.paid_total ELSE 0 END) AS b0,
@@ -456,11 +520,11 @@ class ReportService
              FROM $table d
              JOIN $partyTable party ON party.id = d.$partyKey
              WHERE d.branch_id = ? AND d.deleted_at IS NULL
-               AND d.status IN ('unpaid','partial')
+               AND d.status IN ('unpaid','partial')$searchClause
              GROUP BY party.id, party.name
              HAVING total > 0
              ORDER BY total DESC",
-            [$branchId],
+            $params,
         )->getResultArray();
 
         foreach ($rows as &$row) {

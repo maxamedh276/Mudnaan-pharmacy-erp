@@ -90,13 +90,17 @@ class StatementService
             return [];
         }
 
-        // Fully-paid purchases (no bill): net-zero informational rows.
+        // Purchases with no bill: net-zero informational rows. A bill is
+        // only ever created once something is received, so the only
+        // purchases that ever land here are cancelled ones (a merely
+        // 'pending' order — nothing received yet — has no financial
+        // activity to show and is deliberately excluded).
         $purchases = $database->query(
             "SELECT p.id, COALESCE(p.reference_no, CONCAT('PO-', p.id)) AS ref,
                     p.purchased_at AS date, p.total AS debit, p.total AS credit,
                     'purchase' AS type, p.status
              FROM purchases p
-             WHERE p.branch_id = ? AND p.supplier_id = ?
+             WHERE p.branch_id = ? AND p.supplier_id = ? AND p.status = 'cancelled'
                AND NOT EXISTS (SELECT 1 FROM supplier_bills b WHERE b.purchase_id = p.id)",
             [$branchId, $supplierId],
         )->getResultArray();

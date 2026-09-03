@@ -49,6 +49,8 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers'], static function (Ro
         $routes->post('purchases', 'Inventory\PurchasesController::create');
         $routes->get('purchases/(:num)', 'Inventory\PurchasesController::show/$1');
         $routes->post('purchases/(:num)/void', 'Inventory\PurchasesController::void/$1');
+        $routes->get('purchases/(:num)/receipts', 'Inventory\PurchasesController::receipts/$1');
+        $routes->post('purchases/(:num)/receipts', 'Inventory\PurchasesController::receive/$1');
 
         // People
         $routes->get('customers', 'People\CustomersController::index');

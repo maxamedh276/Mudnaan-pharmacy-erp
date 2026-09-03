@@ -367,83 +367,144 @@ suppliers = folder("Suppliers", (
 ])
 
 purchases = folder("Purchases", (
-    "Goods received — the inverse of a sale: ADDS stock (+qty ledger "
-    "rows) and re-averages the product's cost (weighted average), so "
-    "stock value and the Inventory account rise together. A purchase "
-    "that isn't fully paid auto-creates a linked supplier bill and posts "
-    "Inventory / Cash + Accounts Payable. Purchases are never edited or "
-    "deleted — only VOIDED, and only when nothing depends on them. "
+    "Purchase ORDERS — what was ordered from a supplier, not what's "
+    "arrived. Creating one books NOTHING: no stock, no GL, no supplier "
+    "bill, status starts 'pending'. Only a RECEIPT (below) moves stock "
+    "(+qty ledger rows), re-averages the product's cost (weighted "
+    "average), posts Inventory / Accounts Payable, and grows the "
+    "supplier's bill — valued at exactly what was received, which can "
+    "happen across more than one partial batch. A purchase order can "
+    "only be voided while still 'pending' (nothing received yet); once "
+    "anything has been received it stands. "
     "Permissions: purchases.view / purchases.create."
 ), [
     req("List purchases", "GET", "purchases", query="page=1&per_page=10",
         tests=status_tests(200, True)),
-    # ---- inventory effect + weighted average ----
-    req("Stock + cost BEFORE purchase", "GET", "products/{{product_id}}",
+    # ---- ordering books nothing ----
+    req("Stock + cost BEFORE ordering", "GET", "products/{{product_id}}",
         description="Stores {{qty_before_pur}} and {{cost_before_pur}}.",
         tests=status_tests(200, True) + [
             "const d = pm.response.json().data;",
             "pm.collectionVariables.set('qty_before_pur', d.quantity);",
             "pm.collectionVariables.set('cost_before_pur', d.cost_price);",
         ]),
-    req("Create purchase (partially paid → auto-bill)", "POST", "purchases",
+    req("Create purchase order (pending)", "POST", "purchases",
         body={"supplier_id": "{{supplier_id}}", "reference_no": "PO-PM-001",
-              "paid_amount": 20,
               "items": [{"product_id": "{{product_id}}", "quantity": 50,
                          "unit_cost": 0.50}]},
-        description="50 units at 0.50 = 25.00, pays 20.00 → a supplier bill "
-                    "for the outstanding 5.00 appears in Supplier Bills. "
-                    "Stores {{purchase_id}}.",
-        tests=status_tests(201, True) + capture("purchase_id")),
-    req("Stock AFTER purchase = before + 50", "GET",
-        "products/{{product_id}}",
-        description="Proves the purchase added stock and re-averaged cost "
-                    "(unit cost 0.50 pulls the average below the old cost).",
+        description="50 units at 0.50 = 25.00 ordered. Stores {{purchase_id}}.",
+        tests=status_tests(201, True) + capture("purchase_id") + [
+            "const d = pm.response.json().data;",
+            "pm.test('Status is pending', () => "
+            "pm.expect(d.status).to.eql('pending'));",
+            "pm.test('Nothing received yet', () => "
+            "pm.expect(d.quantity_received).to.eql(0));",
+            "pm.collectionVariables.set('po_item_id', d.items[0].id);",
+        ]),
+    req("Stock UNCHANGED after ordering", "GET", "products/{{product_id}}",
+        description="Proves creating an order never touches inventory.",
+        tests=status_tests(200, True) + [
+            "pm.test('Stock did not move', () => "
+            "pm.expect(pm.response.json().data.quantity).to.eql("
+            "Number(pm.collectionVariables.get('qty_before_pur'))));",
+        ]),
+    req("Create purchase — no items (422)", "POST", "purchases",
+        body={"supplier_id": "{{supplier_id}}", "items": []},
+        tests=status_tests(422, False) + error_code_test("EMPTY_PURCHASE")),
+    # ---- receiving: partial, then the rest ----
+    req("Receive 30 of 50", "POST", "purchases/{{purchase_id}}/receipts",
+        body={"items": [{"purchase_item_id": "{{po_item_id}}",
+                          "quantity": 30}]},
+        description="First batch. Stores {{partial_receipt_id}}.",
+        tests=status_tests(201, True) + capture("partial_receipt_id")),
+    req("Stock +30 and cost re-averaged", "GET", "products/{{product_id}}",
+        description="Proves receiving — not ordering — is what moves stock.",
         tests=status_tests(200, True) + [
             "const d = pm.response.json().data;",
             "const before = "
             "Number(pm.collectionVariables.get('qty_before_pur'));",
-            "pm.test('Stock increased by 50', () => "
-            "pm.expect(d.quantity - before).to.eql(50));",
+            "pm.test('Stock increased by exactly 30', () => "
+            "pm.expect(d.quantity - before).to.eql(30));",
             "pm.test('Weighted-average cost moved toward unit cost', () => "
             "pm.expect(d.cost_price).to.be.at.most("
             "Number(pm.collectionVariables.get('cost_before_pur'))));",
         ]),
-    req("Get purchase", "GET", "purchases/{{purchase_id}}",
-        tests=status_tests(200, True)),
-    req("Create purchase — no items (422)", "POST", "purchases",
-        body={"supplier_id": "{{supplier_id}}", "items": []},
-        tests=status_tests(422, False) + error_code_test("EMPTY_PURCHASE")),
-    # ---- void (reversal) ----
-    req("Create a voidable purchase", "POST", "purchases",
-        body={"supplier_id": "{{supplier_id}}", "paid_amount": 5.5,
+    req("Purchase is now partially_received", "GET",
+        "purchases/{{purchase_id}}",
+        tests=status_tests(200, True) + [
+            "const d = pm.response.json().data;",
+            "pm.test('Status is partially_received', () => "
+            "pm.expect(d.status).to.eql('partially_received'));",
+            "pm.test('20 units remain', () => "
+            "pm.expect(d.items[0].quantity_remaining).to.eql(20));",
+        ]),
+    req("Over-receive the remainder (422)", "POST",
+        "purchases/{{purchase_id}}/receipts",
+        body={"items": [{"purchase_item_id": "{{po_item_id}}",
+                          "quantity": 21}]},
+        description="Only 20 remain — asking for 21 must fail.",
+        tests=status_tests(422, False) + error_code_test("OVER_RECEIPT")),
+    req("Receive the remaining 20", "POST",
+        "purchases/{{purchase_id}}/receipts",
+        body={"items": [{"purchase_item_id": "{{po_item_id}}",
+                          "quantity": 20}]},
+        tests=status_tests(201, True)),
+    req("Stock +50 total, purchase fully received", "GET",
+        "purchases/{{purchase_id}}",
+        tests=status_tests(200, True) + [
+            "pm.test('Status is received', () => "
+            "pm.expect(pm.response.json().data.status).to.eql('received'));",
+        ]),
+    req("List receipts for this purchase", "GET",
+        "purchases/{{purchase_id}}/receipts",
+        description="Both batches should be here.",
+        tests=status_tests(200, True) + [
+            "pm.test('Two receipts recorded', () => "
+            "pm.expect(pm.response.json().data.length).to.eql(2));",
+        ]),
+    req("Auto-bill reflects RECEIVED value (25.00), not ordered", "GET",
+        "supplier-bills", query="supplier_id={{supplier_id}}",
+        description="Payable is based on what arrived — 50 × 0.50 = 25.00 — "
+                    "grown across both receipts, never the ordered total "
+                    "up front. Stores {{receiving_bill_id}}.",
+        tests=status_tests(200, True) + [
+            "const target = "
+            "Number(pm.collectionVariables.get('purchase_id'));",
+            "const bill = pm.response.json().data.find("
+            "b => b.purchase_id === target);",
+            "pm.test('Bill exists for the purchase', () => "
+            "pm.expect(bill, 'linked bill').to.not.be.undefined);",
+            "if (bill) {",
+            "    pm.collectionVariables.set('receiving_bill_id', bill.id);",
+            "    pm.test('Bill total is the received value', () => "
+            "    pm.expect(bill.total).to.eql(25));",
+            "}",
+        ]),
+    # ---- void: only while still pending ----
+    req("Create a voidable (still pending) purchase", "POST", "purchases",
+        body={"supplier_id": "{{supplier_id}}",
               "items": [{"product_id": "{{product_id}}", "quantity": 10,
                          "unit_cost": 0.55}]},
-        description="Fully paid, 10 units — safe to void. "
+        description="Nothing received yet — safe to void. "
                     "Stores {{void_purchase_id}}.",
         tests=status_tests(201, True) + capture("void_purchase_id")),
-    req("Stock before void", "GET", "products/{{product_id}}",
-        tests=status_tests(200, True) + [
-            "pm.collectionVariables.set('qty_pre_void', "
-            "pm.response.json().data.quantity);",
-        ]),
-    req("Void the purchase → stock reversed", "POST",
+    req("Void the pending purchase", "POST",
         "purchases/{{void_purchase_id}}/void",
         body={"reason": "wrong order"},
-        description="Reverses the stock and the accounting; the purchase "
-                    "is marked cancelled (never deleted).",
+        description="A pending order has no stock/GL impact, so voiding it "
+                    "is just a status flip — never deleted.",
         tests=status_tests(200, True) + [
             "pm.test('Cancelled', () => "
             "pm.expect(pm.response.json().data.status).to.eql('cancelled'));",
         ]),
-    req("Stock returned to pre-void − 10", "GET", "products/{{product_id}}",
-        tests=status_tests(200, True) + [
-            "pm.test('10 units removed by the void', () => "
-            "pm.expect(Number(pm.collectionVariables.get('qty_pre_void')) - "
-            "pm.response.json().data.quantity).to.eql(10));",
-        ]),
     req("Double void → 422", "POST", "purchases/{{void_purchase_id}}/void",
         body={},
         tests=status_tests(422, False) + error_code_test("ALREADY_CANCELLED")),
+    req("Void a purchase that's already receiving → 422", "POST",
+        "purchases/{{purchase_id}}/void", body={"reason": "changed my mind"},
+        description="Goods have already been received against {{purchase_id}} "
+                    "(above), so it can no longer be cancelled outright.",
+        tests=status_tests(422, False) + error_code_test("ALREADY_RECEIVING")),
 ])
 
 sales = folder("Sales / POS", (
@@ -661,8 +722,11 @@ customer_deposits = folder("Customer Deposits", (
 
 supplier_bills = folder("Supplier Bills", (
     "Accounts payable documents. Standalone bills (services) post General "
-    "Expense / AP on Premium; purchase-linked bills are auto-created by "
-    "partially-paid purchases and never double-post. "
+    "Expense / AP on Premium; purchase-linked bills are auto-created (and "
+    "grown) by every receipt recorded against a purchase order — valued "
+    "at what was actually received, never the full order up front — and "
+    "never double-post (the receipt's own posting already covered "
+    "Inventory / AP for that value). "
     "Permissions: bills.view / bills.manage."
 ), [
     req("List bills", "GET", "supplier-bills", query="page=1&per_page=10",
@@ -706,35 +770,27 @@ supplier_payments = folder("Supplier Payments", (
             "pm.test('Payment cancelled', () => "
             "pm.expect(pm.response.json().data.status).to.eql('cancelled'));",
         ]),
-    # ---- a purchase can't be voided once its bill is paid ----
-    req("Purchase (partial) for the HAS_PAYMENTS guard", "POST", "purchases",
-        body={"supplier_id": "{{supplier_id}}", "reference_no": "PO-HASPAY",
-              "paid_amount": 0,
-              "items": [{"product_id": "{{product_id}}", "quantity": 4,
-                         "unit_cost": 0.50}]},
-        description="Unpaid → auto-creates a bill. Stores {{haspay_purchase_id}}.",
-        tests=status_tests(201, True) + capture("haspay_purchase_id")),
-    req("Find that purchase's auto-bill", "GET", "supplier-bills",
-        query="supplier_id={{supplier_id}}",
-        description="Captures the bill whose purchase_id matches, into "
-                    "{{haspay_bill_id}}.",
-        tests=status_tests(200, True) + [
-            "const target = "
-            "Number(pm.collectionVariables.get('haspay_purchase_id'));",
-            "const bill = pm.response.json().data.find("
-            "b => b.purchase_id === target);",
-            "pm.test('Auto-bill exists for the purchase', () => "
-            "pm.expect(bill, 'linked bill').to.not.be.undefined);",
-            "if (bill) pm.collectionVariables.set('haspay_bill_id', bill.id);",
-        ]),
-    req("Pay that bill", "POST", "supplier-payments",
-        body={"bill_id": "{{haspay_bill_id}}", "amount": 1, "method": "cash"},
+    # ---- receiving → payable → payment, end to end ----
+    req("Pay the receiving-created bill", "POST", "supplier-payments",
+        body={"bill_id": "{{receiving_bill_id}}", "amount": 10,
+              "method": "cash"},
+        description="Settles part of {{receiving_bill_id}} — the bill the "
+                    "Purchases folder's receipts grew to 25.00 (the RECEIVED "
+                    "value, not the ordered total).",
         tests=status_tests(201, True)),
-    req("Void the purchase → 422 (payment linked)", "POST",
-        "purchases/{{haspay_purchase_id}}/void", body={},
-        description="A supplier payment now references this purchase's bill, "
-                    "so the purchase can't be reversed until it's cancelled.",
-        tests=status_tests(422, False) + error_code_test("HAS_PAYMENTS")),
+    req("Supplier balance reflects billed minus paid", "GET",
+        "suppliers/{{supplier_id}}",
+        description="balance = every non-cancelled bill's total, minus "
+                    "every active payment for this supplier — correct "
+                    "whether or not a payment was linked to a specific "
+                    "bill (on-account payments have no bill_id).",
+        tests=status_tests(200, True) + [
+            "pm.test('balance is present and non-negative', () => {",
+            "    const b = pm.response.json().data.balance;",
+            "    pm.expect(b).to.be.a('number');",
+            "    pm.expect(b).to.be.at.least(0);",
+            "});",
+        ]),
 ])
 
 reports = folder("Reports (Premium)", (
@@ -1128,9 +1184,9 @@ collection = {
         var("staff_user_id"), var("mgr_email"), var("manager_token"),
         var("qty_before"), var("sale_uuid"), var("idem_invoice"),
         var("qty_idem"), var("qty_before_pur"), var("cost_before_pur"),
-        var("void_purchase_id"), var("qty_pre_void"),
-        var("supplier_payment_id"), var("haspay_purchase_id"),
-        var("haspay_bill_id"),
+        var("po_item_id"), var("partial_receipt_id"), var("receiving_bill_id"),
+        var("void_purchase_id"),
+        var("supplier_payment_id"),
     ],
     "item": [
         authentication, dashboard, categories, products, inventory,

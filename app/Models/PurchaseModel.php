@@ -21,9 +21,17 @@ class PurchaseModel extends Model
         $builder = $this->db->table($this->table)
             ->select('purchases.id, purchases.reference_no, purchases.supplier_id,
                       suppliers.name AS supplier_name, users.name AS recorded_by,
-                      purchases.total, purchases.status, purchases.purchased_at')
+                      purchases.total, purchases.status, purchases.purchased_at,
+                      COALESCE(qty.ordered, 0) AS quantity_ordered,
+                      COALESCE(qty.received, 0) AS quantity_received')
             ->join('suppliers', 'suppliers.id = purchases.supplier_id', 'left')
             ->join('users', 'users.id = purchases.user_id', 'left')
+            ->join(
+                '(SELECT purchase_id, SUM(quantity) AS ordered, SUM(quantity_received) AS received
+                  FROM purchase_items GROUP BY purchase_id) qty',
+                'qty.purchase_id = purchases.id',
+                'left',
+            )
             ->where('purchases.branch_id', $branchId);
 
         if (! empty($filters['status'])) {
@@ -41,9 +49,11 @@ class PurchaseModel extends Model
             ->getResultArray();
 
         foreach ($rows as &$row) {
-            $row['id']          = (int) $row['id'];
-            $row['supplier_id'] = $row['supplier_id'] === null ? null : (int) $row['supplier_id'];
-            $row['total']       = (float) $row['total'];
+            $row['id']                = (int) $row['id'];
+            $row['supplier_id']       = $row['supplier_id'] === null ? null : (int) $row['supplier_id'];
+            $row['total']             = (float) $row['total'];
+            $row['quantity_ordered']  = (float) $row['quantity_ordered'];
+            $row['quantity_received'] = (float) $row['quantity_received'];
         }
 
         return ['items' => $rows, 'total' => $total];
@@ -68,21 +78,27 @@ class PurchaseModel extends Model
         $purchase['total'] = (float) $purchase['total'];
 
         $purchase['items'] = array_map(static function (array $item): array {
-            $item['id']         = (int) $item['id'];
-            $item['product_id'] = (int) $item['product_id'];
-            $item['quantity']   = (float) $item['quantity'];
-            $item['unit_cost']  = (float) $item['unit_cost'];
-            $item['line_total'] = (float) $item['line_total'];
+            $item['id']                = (int) $item['id'];
+            $item['product_id']        = (int) $item['product_id'];
+            $item['quantity']          = (float) $item['quantity'];
+            $item['quantity_received'] = (float) $item['quantity_received'];
+            $item['quantity_remaining'] = round($item['quantity'] - $item['quantity_received'], 3);
+            $item['unit_cost']         = (float) $item['unit_cost'];
+            $item['line_total']        = (float) $item['line_total'];
 
             return $item;
         }, $this->db->table('purchase_items')
             ->select('purchase_items.id, purchase_items.product_id,
                       products.name AS product_name, purchase_items.quantity,
+                      purchase_items.quantity_received,
                       purchase_items.unit_cost, purchase_items.line_total')
             ->join('products', 'products.id = purchase_items.product_id')
             ->where('purchase_items.purchase_id', $purchaseId)
             ->get()
             ->getResultArray());
+
+        $purchase['quantity_ordered']  = array_sum(array_column($purchase['items'], 'quantity'));
+        $purchase['quantity_received'] = array_sum(array_column($purchase['items'], 'quantity_received'));
 
         return $purchase;
     }

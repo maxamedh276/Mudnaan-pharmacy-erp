@@ -479,10 +479,14 @@ CREATE TABLE purchases (
   user_id       BIGINT UNSIGNED NOT NULL,      -- who recorded it
   reference_no  VARCHAR(80)  NULL,             -- supplier invoice number
   total         DECIMAL(12,2) NOT NULL DEFAULT 0.00,
-  status        ENUM('received','pending','cancelled') NOT NULL DEFAULT 'received',
+  -- pending = ordered, nothing received yet; partially_received = some
+  -- lines short of their ordered quantity; received = everything in.
+  -- Only a pending PO (nothing received yet) can be cancelled.
+  status        ENUM('pending','partially_received','received','cancelled')
+                        NOT NULL DEFAULT 'pending',
   method          ENUM('cash','card','mobile_money','bank','cheque')
-                          NOT NULL DEFAULT 'cash',  -- how the paid portion was settled
-  bank_account_id BIGINT UNSIGNED NULL,             -- which money account paid (FK added in 04_*)
+                          NOT NULL DEFAULT 'cash',  -- unused by new POs; kept for old data
+  bank_account_id BIGINT UNSIGNED NULL,             -- unused by new POs; kept for old data
   purchased_at  TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
   created_at    TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -498,18 +502,59 @@ CREATE TABLE purchases (
 -- WHAT:  The line items of a purchase (which products, how many, cost).
 -- ------------------------------------------------------------------
 CREATE TABLE purchase_items (
-  id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  purchase_id   BIGINT UNSIGNED NOT NULL,
-  product_id    BIGINT UNSIGNED NOT NULL,
-  batch_id      BIGINT UNSIGNED NULL,          -- new batch created on receipt
-  quantity      DECIMAL(12,3) NOT NULL DEFAULT 1,
-  unit_cost     DECIMAL(12,2) NOT NULL DEFAULT 0.00,
-  line_total    DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  id                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  purchase_id        BIGINT UNSIGNED NOT NULL,
+  product_id         BIGINT UNSIGNED NOT NULL,
+  batch_id           BIGINT UNSIGNED NULL,          -- new batch created on receipt
+  quantity           DECIMAL(12,3) NOT NULL DEFAULT 1,   -- ORDERED quantity
+  quantity_received  DECIMAL(12,3) NOT NULL DEFAULT 0,   -- running total actually received
+  unit_cost          DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  line_total         DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   PRIMARY KEY (id),
   KEY idx_puritem_purchase (purchase_id),
   CONSTRAINT fk_puritem_purchase FOREIGN KEY (purchase_id)
        REFERENCES purchases (id) ON DELETE CASCADE,
   CONSTRAINT fk_puritem_product  FOREIGN KEY (product_id) REFERENCES products (id)
+) ENGINE=InnoDB;
+
+-- ------------------------------------------------------------------
+-- TABLE: purchase_receipts / purchase_receipt_items
+-- WHAT:  A goods-in event against a purchase order. A PO can be
+--        received in one shot or several partial batches; each batch
+--        is its own receipt row. Only a receipt moves stock and posts
+--        the GL — creating the PO itself never does.
+-- ------------------------------------------------------------------
+CREATE TABLE purchase_receipts (
+  id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  uuid         CHAR(36)     NOT NULL,
+  branch_id    BIGINT UNSIGNED NOT NULL,
+  purchase_id  BIGINT UNSIGNED NOT NULL,
+  receipt_no   VARCHAR(50)  NULL,          -- GRN-00001
+  received_at  TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+  notes        VARCHAR(255) NULL,
+  created_by   BIGINT UNSIGNED NULL,
+  created_at   TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_prcpt_uuid (uuid),
+  KEY idx_prcpt_purchase (purchase_id),
+  CONSTRAINT fk_prcpt_branch   FOREIGN KEY (branch_id)   REFERENCES branches (id),
+  CONSTRAINT fk_prcpt_purchase FOREIGN KEY (purchase_id) REFERENCES purchases (id)
+) ENGINE=InnoDB;
+
+CREATE TABLE purchase_receipt_items (
+  id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  receipt_id        BIGINT UNSIGNED NOT NULL,
+  purchase_item_id  BIGINT UNSIGNED NOT NULL,
+  product_id        BIGINT UNSIGNED NOT NULL,
+  quantity          DECIMAL(12,3) NOT NULL,    -- received in THIS batch
+  unit_cost         DECIMAL(12,2) NOT NULL,    -- snapshot of the PO line's cost
+  line_total        DECIMAL(12,2) NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_prcptitem_receipt (receipt_id),
+  CONSTRAINT fk_prcptitem_receipt FOREIGN KEY (receipt_id)
+       REFERENCES purchase_receipts (id) ON DELETE CASCADE,
+  CONSTRAINT fk_prcptitem_pi      FOREIGN KEY (purchase_item_id) REFERENCES purchase_items (id),
+  CONSTRAINT fk_prcptitem_product FOREIGN KEY (product_id) REFERENCES products (id)
 ) ENGINE=InnoDB;
 
 
