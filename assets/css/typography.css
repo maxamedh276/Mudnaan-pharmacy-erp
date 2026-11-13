@@ -1,0 +1,62 @@
+/* Screen typography only: keep the root rem size, layout spacing and print output intact. */
+:is(body.erp-shell, body.pos-shell, body.erp-auth) {
+    --ui-text-xs: .875rem;
+    --ui-line-xs: 1.375rem;
+    --ui-text-sm: .9375rem;
+    --ui-line-sm: 1.5rem;
+    font-size: .9375rem;
+    line-height: 1.5;
+}
+
+:is(.erp-shell, .pos-shell, .erp-auth) :is([class~="text-[8px]"], [class~="text-[9px]"], [class~="text-[10px]"]) {
+    font-size: .75rem;
+    line-height: 1.5;
+}
+:is(.erp-shell, .pos-shell, .erp-auth) [class~="text-[11px]"] {
+    font-size: .8125rem;
+    line-height: 1.5;
+}
+:is(.erp-shell, .pos-shell, .erp-auth) :is([class~="text-[12px]"], [class~="text-[13px]"]) {
+    font-size: .875rem;
+    line-height: 1.5;
+}
+
+/* Widgets have their own styles, so bring them onto the same readable scale. */
+body.erp-shell .dataTables_wrapper,
+body.erp-shell .dataTables_wrapper :is(.dataTables_info, .dataTables_paginate),
+body.erp-shell .dataTables_wrapper .dataTables_filter input,
+body.erp-shell .dataTables_wrapper .dataTables_length select,
+:is(body.erp-shell, body.pos-shell, body.erp-auth) :is(.select2-container, .erp-toast) {
+    font-size: .875rem;
+}
+
+/* Reports use explicit pixel sizes instead of Tailwind's text utilities. */
+body.erp-shell :is(.report-table, .report-button, .report-subtitle, .report-empty),
+body.erp-shell .report-filter-grid :is(input, select) {
+    font-size: .875rem;
+}
+body.erp-shell :is(.report-filter-grid label, .report-kpi-label, .report-filter-footer,
+    .report-date-ranges button, .report-scope, .report-group-title, .report-group-total,
+    .report-section-total),
+body.erp-shell .report-table .report-secondary,
+body.erp-shell .report-table-heading p,
+body.erp-shell .report-reconciliation :is(.report-reconcile-note, .report-badge),
+body.erp-shell .report-reconciliation > div > span {
+    font-size: .8125rem;
+}
+body.erp-shell :is(.report-eyebrow, .report-currency, .report-kpi-unit, .report-count,
+    .report-badge, .report-category-title, .report-account-code),
+body.erp-shell .report-table th {
+    font-size: .75rem;
+}
+body.erp-shell .report-account-code { width: 58px; }
+body.erp-shell .report-detail-content .report-table-heading h2 { font-size: .875rem; }
+body.erp-shell .dashboard-bar-chart text { font-size: 11px; }
+
+/* Keep touch inputs readable and prevent focus zoom on mobile browsers. */
+@media (max-width: 639px) {
+    :is(body.erp-shell, body.pos-shell, body.erp-auth) :is(
+        input:not([type=checkbox]):not([type=radio]):not([type=color]), select, textarea,
+        .select2-search__field, .select2-selection__rendered
+    ) { font-size: 1rem; }
+}

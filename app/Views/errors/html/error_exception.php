@@ -425,5 +425,6 @@ $errorId = uniqid('error', true);
     </div> <!-- /container -->
     <?php endif; ?>
 
+<?php require APPPATH . 'Views/partials/copyright.php'; ?>
 </body>
 </html>

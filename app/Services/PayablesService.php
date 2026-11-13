@@ -203,41 +203,48 @@ class PayablesService
             ];
         }
 
-        $database->transException(true)->transStart();
-
-        $database->table('supplier_bills')->insert([
-            'uuid'        => $data['uuid'] ?? Uuid::v4(),
-            'branch_id'   => $branchId,
-            'supplier_id' => $supplierId,
-            'bill_no'     => $data['bill_no'] ?? null,
-            'bill_date'   => $data['bill_date'] ?? date('Y-m-d'),
-            'due_date'    => $data['due_date'] ?? null,
-            'subtotal'    => round($total, 2),
-            'total'       => round($total, 2),
-            'status'      => 'unpaid',
-            'notes'       => $data['notes'] ?? null,
-            'created_by'  => $userId,
-        ]);
-
-        $billId = (int) $database->insertID();
-
-        if (empty($data['bill_no'])) {
-            $database->table('supplier_bills')->where('id', $billId)
-                ->update(['bill_no' => 'BILL-' . str_pad((string) $billId, 5, '0', STR_PAD_LEFT)]);
+        if (! $database->transException(true)->transBegin()) {
+            throw new \RuntimeException('TRANSACTION_FAILED');
         }
+        try {
+            $database->table('supplier_bills')->insert([
+                'uuid'        => $data['uuid'] ?? Uuid::v4(),
+                'branch_id'   => $branchId,
+                'supplier_id' => $supplierId,
+                'bill_no'     => $data['bill_no'] ?? null,
+                'bill_date'   => $data['bill_date'] ?? date('Y-m-d'),
+                'due_date'    => $data['due_date'] ?? null,
+                'subtotal'    => round($total, 2),
+                'total'       => round($total, 2),
+                'status'      => 'unpaid',
+                'notes'       => $data['notes'] ?? null,
+                'created_by'  => $userId,
+            ]);
 
-        foreach ($itemRows as $index => $itemRow) {
-            $itemRows[$index]['bill_id'] = $billId;
+            $billId = (int) $database->insertID();
+
+            if (empty($data['bill_no'])) {
+                $database->table('supplier_bills')->where('id', $billId)
+                    ->update(['bill_no' => 'BILL-' . str_pad((string) $billId, 5, '0', STR_PAD_LEFT)]);
+            }
+
+            foreach ($itemRows as $index => $itemRow) {
+                $itemRows[$index]['bill_id'] = $billId;
+            }
+
+            $database->table('supplier_bill_items')->insertBatch($itemRows);
+
+            if ($plan === 'premium') {
+                $bill = $database->table('supplier_bills')->where('id', $billId)->get()->getRowArray();
+                $this->accounting->postSupplierBill($bill, $userId);
+            }
+            if (! $database->transStatus() || ! $database->transCommit()) {
+                throw new \RuntimeException('TRANSACTION_FAILED');
+            }
+        } catch (\Throwable $exception) {
+            $database->transRollback();
+            throw $exception;
         }
-
-        $database->table('supplier_bill_items')->insertBatch($itemRows);
-
-        if ($plan === 'premium') {
-            $bill = $database->table('supplier_bills')->where('id', $billId)->get()->getRowArray();
-            $this->accounting->postSupplierBill($bill, $userId);
-        }
-
-        $database->transComplete();
 
         AuditService::log('supplier_bill.create', 'payables', 'supplier_bills', $billId, details: ['total' => $total]);
 
@@ -256,11 +263,7 @@ class PayablesService
     {
         $database = db_connect();
 
-        $bill = $database->table('supplier_bills')
-            ->where('purchase_id', $purchase['id'])
-            ->where('deleted_at', null)
-            ->get()
-            ->getRowArray();
+        $bill = $database->query('SELECT * FROM supplier_bills WHERE purchase_id = ? AND deleted_at IS NULL FOR UPDATE', [$purchase['id']])->getRowArray();
 
         if ($bill === null) {
             $database->table('supplier_bills')->insert([
@@ -305,93 +308,124 @@ class PayablesService
      *                     bank_account_id?, reference?, notes?}
      * supplier_id may be omitted when bill_id is given.
      */
-    public function recordPayment(array $data, int $branchId, int $userId, string $plan): array
+    public function recordPayment(array $data, int $branchId, int $userId, string $plan, ?int $accountId = null): array
     {
         $amount = round((float) ($data['amount'] ?? 0), 2);
 
-        if ($amount <= 0) {
+        if (!is_numeric($data['amount']??null) || !is_finite($amount) || $amount <= 0) {
             throw new InvalidArgumentException('INVALID_AMOUNT');
         }
 
         $method = $data['method'] ?? 'cash';
+        $uuid = $data['uuid'] ?? Uuid::v4();
 
         if (! in_array($method, ['cash', 'card', 'mobile_money', 'bank', 'cheque'], true)) {
             throw new InvalidArgumentException('INVALID_PAYMENT_METHOD');
         }
 
         $database = db_connect();
-        $billId   = isset($data['bill_id']) ? (int) $data['bill_id'] : null;
-        $bill     = null;
-
-        if ($billId !== null) {
-            $bill = $database->table('supplier_bills')
-                ->where('id', $billId)
-                ->where('branch_id', $branchId)
-                ->where('deleted_at', null)
-                ->get()
-                ->getRowArray();
-
-            if ($bill === null) {
-                throw new InvalidArgumentException('BILL_NOT_FOUND');
-            }
-
-            if ($bill['status'] === 'cancelled') {
-                throw new InvalidArgumentException('BILL_CANCELLED');
-            }
-
-            $outstanding = round($bill['total'] - $bill['paid_total'], 2);
-
-            if ($amount > $outstanding) {
-                throw new InvalidArgumentException('OVERPAYMENT');
-            }
+        if (! $database->transException(true)->transBegin()) {
+            throw new \RuntimeException('TRANSACTION_FAILED');
         }
+        try {
+            $billId   = isset($data['bill_id']) ? (int) $data['bill_id'] : null;
+            $bill     = null;
+            if (!$billId) throw new InvalidArgumentException('BILL_NOT_FOUND');
 
-        $supplierId = (int) ($data['supplier_id'] ?? $bill['supplier_id'] ?? 0);
+            if ($billId !== null) {
+                $bill = $database->query('SELECT * FROM supplier_bills WHERE id = ? AND branch_id = ? AND deleted_at IS NULL FOR UPDATE', [$billId, $branchId])->getRowArray();
 
-        if ($supplierId <= 0) {
-            throw new InvalidArgumentException('SUPPLIER_REQUIRED');
-        }
+                if ($bill === null) {
+                    throw new InvalidArgumentException('BILL_NOT_FOUND');
+                }
+                if ($accountId !== null) {
+                    // The bill lock serializes retries before checking the remaining balance.
+                    $existing = $database->table('supplier_payments')->where('uuid', $uuid)->get()->getRowArray();
+                    if ($existing !== null) {
+                        if ((int) $existing['branch_id'] !== $branchId || (int) $existing['bill_id'] !== $billId
+                            || (int) ($existing['account_id'] ?? 0) !== $accountId || (float) $existing['amount'] !== $amount
+                            || (string) $existing['reference'] !== (string) ($data['reference'] ?? '')) {
+                            throw new InvalidArgumentException('DUPLICATE_REQUEST');
+                        }
+                        if (!$database->transStatus() || !$database->transCommit()) {
+                            throw new \RuntimeException('TRANSACTION_FAILED');
+                        }
+                        return $this->paymentResult((int) $existing['id']);
+                    }
+                    $method = (new ReceiptCashAccountService())->lockSettlementMethod($accountId);
+                    $today = date('Y-m-d');
+                    if ($database->table('financial_periods')->where('status', 'closed')
+                        ->where('start_date <=', $today)->where('end_date >=', $today)->countAllResults()) {
+                        throw new InvalidArgumentException('PERIOD_CLOSED');
+                    }
+                }
 
-        $database->transException(true)->transStart();
+                if ($bill['status'] === 'cancelled') {
+                    throw new InvalidArgumentException('BILL_CANCELLED');
+                }
 
-        $database->table('supplier_payments')->insert([
-            'uuid'            => $data['uuid'] ?? Uuid::v4(),
-            'branch_id'       => $branchId,
-            'supplier_id'     => $supplierId,
-            'bill_id'         => $billId,
-            'method'          => $method,
-            'bank_account_id' => $data['bank_account_id'] ?? null,
-            'amount'          => $amount,
-            'reference'       => $data['reference'] ?? null,
-            'notes'           => $data['notes'] ?? null,
-            'created_by'      => $userId,
-        ]);
+                $outstanding = round($bill['total'] - $bill['paid_total'], 2);
 
-        $paymentId = (int) $database->insertID();
-        $paymentNo = 'PAY-' . str_pad((string) $paymentId, 5, '0', STR_PAD_LEFT);
-        $database->table('supplier_payments')->where('id', $paymentId)
-            ->update(['payment_no' => $paymentNo]);
+                if ($amount > $outstanding) {
+                    throw new InvalidArgumentException('OVERPAYMENT');
+                }
+            }
 
-        if ($bill !== null) {
-            $newPaid = round($bill['paid_total'] + $amount, 2);
-            $database->table('supplier_bills')->where('id', $billId)->update([
-                'paid_total' => $newPaid,
-                'status'     => $newPaid >= (float) $bill['total'] ? 'paid' : 'partial',
+            $supplierId = (int) ($data['supplier_id'] ?? $bill['supplier_id'] ?? 0);
+
+            if ($supplierId <= 0 || ($bill !== null && $supplierId !== (int) $bill['supplier_id'])) {
+                throw new InvalidArgumentException('SUPPLIER_REQUIRED');
+            }
+
+            $database->table('supplier_payments')->insert([
+                'uuid'            => $uuid,
+                'branch_id'       => $branchId,
+                'supplier_id'     => $supplierId,
+                'bill_id'         => $billId,
+                'method'          => $method,
+                'bank_account_id' => $accountId === null ? ($data['bank_account_id'] ?? null) : null,
+                ...($accountId !== null ? ['account_id' => $accountId] : []),
+                'amount'          => $amount,
+                'reference'       => $data['reference'] ?? null,
+                'notes'           => $data['notes'] ?? null,
+                'created_by'      => $userId,
             ]);
-        }
 
-        if ($plan === 'premium') {
-            $payment = $database->table('supplier_payments')->where('id', $paymentId)->get()->getRowArray();
-            $this->accounting->postSupplierPayment($payment, $userId);
-        }
+            $paymentId = (int) $database->insertID();
+            $paymentNo = 'PAY-' . str_pad((string) $paymentId, 5, '0', STR_PAD_LEFT);
+            $database->table('supplier_payments')->where('id', $paymentId)
+                ->update(['payment_no' => $paymentNo]);
 
-        $database->transComplete();
+            if ($bill !== null) {
+                $newPaid = round($bill['paid_total'] + $amount, 2);
+                $database->table('supplier_bills')->where('id', $billId)->update([
+                    'paid_total' => $newPaid,
+                    'status'     => $newPaid >= (float) $bill['total'] ? 'paid' : 'partial',
+                ]);
+            }
+
+            if ($plan === 'premium') {
+                $payment = $database->table('supplier_payments')->where('id', $paymentId)->get()->getRowArray();
+                $this->accounting->postSupplierPayment($payment, $userId);
+            }
+            if (! $database->transStatus() || ! $database->transCommit()) {
+                throw new \RuntimeException('TRANSACTION_FAILED');
+            }
+        } catch (\Throwable $exception) {
+            $database->transRollback();
+            throw $exception;
+        }
 
         AuditService::log('supplier_payment.create', 'payables', 'supplier_payments', $paymentId, details: [
             'amount' => $amount, 'bill_id' => $billId,
         ]);
 
-        $payment = $database->table('supplier_payments')
+        return $this->paymentResult($paymentId);
+    }
+
+    private function paymentResult(int $paymentId): array
+    {
+        $payment = db_connect()->table('supplier_payments')
             ->select('supplier_payments.*, suppliers.name AS supplier_name')
             ->join('suppliers', 'suppliers.id = supplier_payments.supplier_id')
             ->where('supplier_payments.id', $paymentId)

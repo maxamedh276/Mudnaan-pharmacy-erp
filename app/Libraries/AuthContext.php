@@ -36,7 +36,18 @@ class AuthContext
 
     public static function can(string $permissionCode): bool
     {
+        if ($permissionCode === 'settings.operational') {
+            return self::isSuperadmin();
+        }
+        if (AdministrativeAccess::isFixedRole(self::$user->role_name ?? '')) {
+            return true;
+        }
         return in_array($permissionCode, self::$permissions, true);
+    }
+
+    public static function isSuperadmin(): bool
+    {
+        return AdministrativeAccess::isSuperadminRole(self::$user->role_name ?? '');
     }
 
     public static function reset(): void

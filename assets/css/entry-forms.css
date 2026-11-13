@@ -1,0 +1,161 @@
+/* Shared data-entry surfaces. Business validation and field names stay unchanged. */
+.erp-shell {
+    --entry-border: #dce4ee;
+    --entry-muted: #64748b;
+    --entry-focus: color-mix(in srgb, var(--system-brand) 15%, transparent);
+}
+.erp-shell form :is(input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=color]):not([type=range]):not([type=file]):not([type=submit]):not([type=button]), select, textarea) {
+    min-height: 44px;
+    padding: 10px 13px;
+    border: 1px solid var(--entry-border);
+    border-radius: 10px;
+    background-color: #fbfcfe;
+    color: #1e293b;
+    font-size: 13px;
+    line-height: 1.5;
+    box-shadow: 0 1px 2px #0f172a03;
+    transition: border-color .15s, box-shadow .15s, background-color .15s;
+}
+.erp-shell form :is(input, select, textarea):hover:not(:disabled):not(:read-only) { border-color: #b8c6d8; }
+.erp-shell form :is(input, select, textarea):focus {
+    outline: none;
+    border-color: var(--system-brand);
+    background-color: #fff;
+    box-shadow: 0 0 0 4px var(--entry-focus);
+}
+.erp-shell form :is(input, textarea)::placeholder { color: #94a3b8; font-weight: 400; }
+.erp-shell form :is(input, select, textarea):disabled,
+.erp-shell form input:read-only { background-color: #f1f5f9; color: #64748b; box-shadow: none; }
+.erp-shell form textarea { min-height: 96px; resize: vertical; }
+.erp-shell form :is(input[type=checkbox], input[type=radio]) { width: 17px; height: 17px; accent-color: var(--system-brand); flex-shrink: 0; }
+.erp-shell .modern-entry-form label { color: #475569; font-size: 12px; font-weight: 600; line-height: 1.6; }
+.erp-shell .modern-entry-form label > :is(input, select, textarea) { margin-top: 7px; font-weight: 400; }
+.erp-shell .modern-entry-form .grid { row-gap: 20px; column-gap: 20px; }
+.erp-shell .modern-entry-form :is(button[type=submit], #pharmacySave, #btn-save-po, #btn-submit-receive) { min-height: 43px; padding: 10px 22px; border-radius: 10px; font-size: 12px; font-weight: 650; box-shadow: 0 3px 7px #0f172a0b; }
+.erp-shell .modern-entry-form button { transition: background-color .15s, box-shadow .15s; }
+.erp-shell .modern-entry-form table :is(input, select) { min-height: 38px; padding: 7px 10px; }
+.erp-shell dialog { border: 1px solid #e2e8f0; box-shadow: 0 28px 90px #0f172a30; border-radius: 20px; }
+.erp-shell dialog::backdrop { background: #0f172a70; backdrop-filter: blur(5px); }
+.entry-dialog-header { position: sticky; top: -24px; z-index: 3; margin: -24px -24px 0; padding: 22px 24px; background: linear-gradient(120deg, #f8fafc, #fff); border-bottom: 1px solid #e2e8f0; }
+.entry-dialog-header h2 { font-size: 20px; letter-spacing: -.4px; color: #0f172a; }
+.entry-dialog-header p { margin-top: 5px; font-size: 12px; color: #64748b; font-weight: 400; }
+.entry-dialog-header button { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #e2e8f0; background: #fff; border-radius: 10px; font-size: 22px; color: #64748b; flex-shrink: 0; }
+.entry-section-heading { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding-top: 14px; margin-bottom: -5px; }
+.entry-section-heading span { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: color-mix(in srgb, var(--system-brand) 8%, white); color: var(--system-brand); font-size: 11px; font-weight: 700; }
+.entry-section-heading h3 { color: #0f172a; font-size: 13px; font-weight: 700; }
+.entry-unit-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid #e2e8f0; padding-top: 20px; }
+.entry-unit-heading h3 { color: #0f172a; font-size: 14px; font-weight: 700; }
+.entry-unit-heading p { color: #64748b; font-size: 11px; margin-top: 4px; line-height: 1.6; }
+.erp-shell .medicine-unit-row, .erp-shell .rx-line, .erp-shell .cart-line { padding: 18px; border: 1px solid #e2e8f0; border-radius: 13px; background: #f8fafc; }
+.erp-shell .medicine-unit-row :is(input, select), .erp-shell .cart-line :is(input, select) { background-color: white; }
+.entry-form-footer { position: sticky; bottom: -24px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 24px -24px -24px; padding: 16px 24px; border-top: 1px solid #e2e8f0; background: #fff; box-shadow: 0 -5px 14px #0f172a03; }
+.entry-form-footer small { color: #64748b; font-size: 11px; }
+.entry-form-footer > div { display: flex; gap: 9px; }
+.entry-cancel { min-height: 43px; padding: 9px 17px; border: 1px solid #e2e8f0; border-radius: 10px; color: #475569; background: white; font-size: 12px; font-weight: 600; }
+.entry-required { color: #e11d48; margin-left: 4px; font-size: 12px; }
+.erp-shell .modern-entry-form :is(input, select, textarea)[aria-invalid=true] { border-color: #e11d48; background-color: #fff8f9; }
+.erp-shell .select2-container--default .select2-selection--single { min-height: 44px; border-color: var(--entry-border); border-radius: 10px; background: #fbfcfe; }
+.erp-shell .select2-container--default .select2-selection--single .select2-selection__rendered { line-height: 42px; padding-left: 13px; font-size: 13px; }
+.erp-shell .select2-container--default .select2-selection--single .select2-selection__arrow { height: 42px; }
+@media(max-width: 639px) {
+    .erp-shell .modern-entry-form .grid { row-gap: 16px; }
+    .erp-shell form :is(input, select, textarea) { font-size: 16px; }
+    .entry-dialog-header { padding: 18px 20px; }
+    .entry-form-footer { padding: 14px 20px; flex-wrap: wrap; }
+    .entry-form-footer small { display: none; }
+    .entry-form-footer > div { width: 100%; }
+    .entry-form-footer button { flex: 1; }
+}
+@media(prefers-reduced-motion: reduce) { .erp-shell form :is(input, select, textarea, button) { transition: none; } }
+/* Dialogs own the viewport instead of being confined inside a workspace tab. */
+.erp-shell .workspace-content-frame.workspace-modal-frame {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    max-height: none !important;
+    z-index: 80;
+    background: transparent;
+}
+.erp-shell #pharmacyDialog {
+    width: min(1080px, calc(100vw - 48px));
+    max-width: none;
+    max-height: calc(100dvh - 48px);
+    padding: 0;
+    overflow: hidden;
+    border-radius: 18px;
+}
+#pharmacyDialog #pharmacyForm {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100dvh - 48px);
+    padding: 0;
+    min-height: 0;
+}
+#pharmacyForm > :not([hidden]) ~ :not([hidden]) { margin-top: 0; }
+#pharmacyForm .entry-dialog-header {
+    position: static;
+    flex-shrink: 0;
+    margin: 0;
+    padding: 20px 26px;
+}
+#pharmacyForm .entry-editor-tabs {
+    display: flex;
+    flex-shrink: 0;
+    gap: 6px;
+    padding: 9px 26px;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+}
+.entry-editor-tabs button {
+    padding: 8px 15px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #64748b;
+}
+.entry-editor-tabs button[aria-selected=true] {
+    background: white;
+    color: var(--system-brand);
+    border-color: #e2e8f0;
+    box-shadow: 0 1px 3px #0f172a05;
+}
+#pharmacyForm .entry-details-grid, #pharmacyForm [data-entry-panel=units] {
+    min-height: 0;
+    padding: 20px 26px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+#pharmacyForm .entry-details-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 20px; }
+#pharmacyForm [hidden] { display: none !important; }
+#pharmacyForm .entry-section-heading { padding: 0 0 4px; margin: 0; }
+#pharmacyForm .entry-unit-heading { border: 0; padding: 0 0 16px; }
+#pharmacyForm .medicine-unit-row { grid-template-columns: 1fr 1fr 1fr 1.4fr auto; gap: 12px; padding: 14px; align-items: end; }
+#pharmacyForm .medicine-unit-row label { grid-column: auto; }
+#pharmacyForm .medicine-unit-row [data-remove-unit] { padding: 12px 0; }
+#pharmacyForm .entry-form-footer { position: static; flex-shrink: 0; margin: 0; padding: 16px 26px; }
+#pharmacyFeedback:empty { display: none; }
+#pharmacyFeedback:not(:empty) { padding: 8px 26px; }
+/* Legacy dialogs have one scroll owner: the form body, not three nested boxes. */
+.erp-shell .fixed.inset-0:has(> .bg-white form):not(#search-modal) { overflow: hidden; }
+.erp-shell .fixed.inset-0 > .bg-white:has(form) { display: flex; flex-direction: column; overflow: hidden; max-height: calc(100dvh - 40px); }
+.erp-shell .fixed.inset-0 > .bg-white > form { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+@media(max-width: 639px) {
+    .erp-shell #pharmacyDialog { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); border-radius: 15px; }
+    #pharmacyDialog #pharmacyForm { max-height: calc(100dvh - 16px); }
+    #pharmacyForm .entry-dialog-header { padding: 15px 18px; }
+    #pharmacyForm .entry-dialog-header h2 { font-size: 18px; }
+    #pharmacyForm .entry-dialog-header p { font-size: 11px; }
+    #pharmacyForm .entry-editor-tabs { padding: 8px 18px; }
+    #pharmacyForm .entry-details-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
+    #pharmacyForm .entry-details-grid, #pharmacyForm [data-entry-panel=units] { padding: 16px 18px; }
+    #pharmacyForm .medicine-unit-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 12px; }
+    #pharmacyForm .entry-form-footer { padding: 12px 18px; }
+}
+#pharmacyForm .entry-plain-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 26px; }
+#pharmacyForm .entry-plain-body .entry-details-grid { padding: 0; overflow: visible; }
+#pharmacyForm .entry-plain-body #prescriptionLines { margin-top: 18px; }
+#pharmacyForm .entry-plain-body #pharmacyAddLine { margin-top: 12px; }
+.erp-shell .fixed.inset-0 > .bg-white:has(form) > :not(form) { flex-shrink: 0; }
+@media(max-width: 639px) { #pharmacyForm .entry-plain-body { padding: 16px 18px; } }

@@ -1,0 +1,24 @@
+(() => {
+    'use strict';
+    const root=document.getElementById('pharmacyStorage');if(!root)return;
+    let data=JSON.parse(document.getElementById('storageInitialData').textContent);
+    const status=document.getElementById('storageStatus');
+    const readingForm=root.querySelector('[data-storage-action="temperature"]');
+    function warning(){if(!readingForm)return;const location=data.locations.find(x=>String(x.id)===readingForm.elements.location_id.value);const value=readingForm.elements.temperature_c.value;const excursion=location&&value!==''&&(Number(value)<Number(location.min_c)||Number(value)>Number(location.max_c));readingForm.elements.action_taken.required=Boolean(excursion);readingForm.querySelector('[data-reading-warning]').textContent=excursion?'Outside configured limits. Record the action taken and arrange the authorised stock assessment.':location?`Configured limits: ${location.min_c} to ${location.max_c} °C`:'';}
+    function render(){
+        const summary=document.getElementById('storageSummary');summary.replaceChildren();
+        for(const [label,value] of [['Storage locations',data.locations.length],['Recorded observations (latest)',data.readings.length],['Out-of-range observations (latest)',data.readings.filter(x=>Number(x.excursion)).length]]){const card=document.createElement('div');card.className='rounded-xl border bg-white p-4';const title=document.createElement('p');title.className='text-sm text-slate-500';title.textContent=label;const count=document.createElement('strong');count.className='text-2xl';count.textContent=value;card.append(title,count);summary.append(card);}
+        if(readingForm){const select=readingForm.elements.location_id;const previous=select.value;select.replaceChildren(new Option('Select location',''));for(const l of data.locations)select.add(new Option(`${l.name} · ${l.min_c}–${l.max_c} °C`,l.id));select.value=previous;}
+        const table=document.getElementById('storageReadings');table.replaceChildren();
+        for(const log of data.readings){const row=document.createElement('tr');row.className='border-t';for(const value of [log.location_name,log.measured_at,`${log.temperature_c} / ${log.min_c}–${log.max_c}`,Number(log.excursion)?'OUT OF RANGE':'Within limits',`${log.action_taken||'—'} · ${log.staff_name||''}`]){const cell=document.createElement('td');cell.className='p-3';cell.textContent=value;row.append(cell);}table.append(row);}
+        if(!data.readings.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=5;cell.className='p-5 text-slate-500';cell.textContent='No observations yet. Add a location, then record its first temperature check.';row.append(cell);table.append(row);}warning();
+    }
+    async function refresh(){status.textContent='Loading…';try{const response=await fetch(`${root.dataset.base}/storage/data`,{credentials:'same-origin',headers:{Accept:'application/json'}});const result=await response.json();if(!response.ok||!result.success)throw new Error(result.message||'Unable to refresh observations.');data=result.data;render();status.textContent='';}catch(error){status.textContent=error.message;throw error;}}
+    document.getElementById('storageRefresh').addEventListener('click',async event=>{event.currentTarget.disabled=true;try{await refresh();}catch(error){window.erp?.toast(error.message,'error');}finally{document.getElementById('storageRefresh').disabled=false;}});
+    readingForm?.addEventListener('input',warning);readingForm?.addEventListener('change',warning);
+    root.querySelectorAll('form[data-storage-action]').forEach(form=>{let key=crypto.randomUUID();form.addEventListener('submit',async event=>{
+        event.preventDefault();const button=form.querySelector('button');if(button.disabled||!form.reportValidity())return;button.disabled=true;const feedback=form.querySelector('[data-feedback]');feedback.textContent='';
+        try{const input=Object.fromEntries(new FormData(form));input.request_key=key;const response=await fetch(`${root.dataset.base}/${form.dataset.storageAction}/save`,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','Accept':'application/json','X-Pharmacy-CSRF':root.dataset.token},body:JSON.stringify(input)});const result=await response.json();if(!response.ok||!result.success)throw new Error(result.message||'Unable to save.');key=crypto.randomUUID();form.reset();if(form===readingForm){const d=new Date();d.setMinutes(d.getMinutes()-d.getTimezoneOffset());form.elements.measured_at.value=d.toISOString().slice(0,16);}feedback.textContent=result.message;window.erp?.toast(result.message);await refresh();}
+        catch(error){feedback.textContent=error.message;window.erp?.toast(error.message,'error');}finally{button.disabled=false;}
+    });});render();
+})();

@@ -6,6 +6,7 @@ use App\Controllers\BaseApiController;
 use App\Libraries\AuthContext;
 use App\Models\SaleModel;
 use App\Services\SalesService;
+use App\Services\ThermalPrintService;
 use CodeIgniter\HTTP\ResponseInterface;
 use InvalidArgumentException;
 use RuntimeException;
@@ -95,5 +96,121 @@ class SalesController extends BaseApiController
         }
 
         return $this->respondData($sale, 201);
+    }
+
+    /**
+     * POST /api/v1/sales/{id}/print — Direct ESC/POS Thermal Printing via escpos-php
+     */
+    public function printReceipt(int $saleId): ResponseInterface
+    {
+        if ($denied = $this->requirePermission('sales.view')) {
+            return $denied;
+        }
+
+        $service = new ThermalPrintService();
+        $result = $service->printSale($saleId, $this->branchId());
+
+        return $this->respondData($result, $result['success'] ? 200 : 400);
+    }
+
+    /**
+     * GET /api/v1/sales/{id}/escpos — Raw binary ESC/POS byte stream
+     */
+    public function escposStream(int $saleId): ResponseInterface
+    {
+        if ($denied = $this->requirePermission('sales.view')) {
+            return $denied;
+        }
+
+        $service = new ThermalPrintService();
+        $sale = (new SaleModel())->findDetailed($saleId, $this->branchId());
+
+        if (! $sale) {
+            return $this->respondNotFound('Sale');
+        }
+
+        $config = $service->getConfig();
+        $connector = new \Mike42\Escpos\PrintConnectors\DummyPrintConnector();
+        $printer = new \Mike42\Escpos\Printer($connector);
+
+        $refMethod = new \ReflectionMethod($service, 'buildReceipt');
+        $refMethod->setAccessible(true);
+        $refMethod->invoke($service, $printer, $sale, $config);
+
+        $binaryData = $connector->getData();
+        $printer->close();
+
+        return $this->response
+            ->setHeader('Content-Type', 'application/octet-stream')
+            ->setHeader('Content-Disposition', 'inline; filename="receipt-' . $saleId . '.bin"')
+            ->setBody($binaryData);
+    }
+
+    /**
+     * POST /api/v1/printer/test — Send test slip to ESC/POS thermal printer
+     */
+    public function testPrinter(): ResponseInterface
+    {
+        if ($denied = $this->requirePermission('sales.view')) {
+            return $denied;
+        }
+
+        $service = new ThermalPrintService();
+        $result = $service->printTestSlip();
+
+        return $this->respondData($result, $result['success'] ? 200 : 400);
+    }
+
+    /**
+     * GET /api/v1/printer/settings — Get ESC/POS printer settings
+     */
+    public function getPrinterSettings(): ResponseInterface
+    {
+        if ($denied = $this->requirePermission('sales.view')) {
+            return $denied;
+        }
+
+        $service = new ThermalPrintService();
+        return $this->respondData($service->getConfig());
+    }
+
+    /**
+     * POST /api/v1/printer/settings — Save ESC/POS printer settings
+     */
+    public function savePrinterSettings(): ResponseInterface
+    {
+        if ($denied = $this->requirePermission('sales.manage')) {
+            if ($denied = $this->requirePermission('settings.manage')) {
+                return $denied;
+            }
+        }
+
+        $body = $this->body();
+        $settingModel = new \App\Models\SettingModel();
+
+        $keys = [
+            'thermal_printer_enabled',
+            'thermal_printer_type',
+            'thermal_printer_name',
+            'thermal_printer_ip',
+            'thermal_printer_port',
+            'thermal_paper_width',
+            'thermal_auto_drawer',
+            'thermal_auto_cut',
+            'receipt_header',
+            'receipt_footer',
+        ];
+
+        foreach ($keys as $key) {
+            if (isset($body[$key])) {
+                $settingModel->setVal($key, (string) $body[$key]);
+            }
+        }
+
+        $service = new ThermalPrintService();
+        return $this->respondData([
+            'message'  => 'Thermal printer settings saved successfully.',
+            'settings' => $service->getConfig(),
+        ]);
     }
 }

@@ -10,7 +10,160 @@ use CodeIgniter\Router\RouteCollection;
  *
  * @var RouteCollection $routes
  */
-$routes->get('/', 'Home::index');
+// =====================================================================
+//  WEB PORTAL ROUTES (Phase 1: Auth & Core Dashboard Layout)
+// =====================================================================
+
+// Public auth routes
+$routes->get('login', 'Web\AuthController::login', ['filter'=>'csrf']);
+$routes->post('login', 'Web\AuthController::authenticate', ['filter'=>'csrf']);
+$routes->get('logout', 'Web\AuthController::logout');
+$routes->post('web/session-sync', 'Web\AuthController::sessionSync');
+
+// Protected web routes (requires valid web session / token)
+$routes->group('', ['filter' => 'web_auth'], static function (RouteCollection $routes) {
+    $routes->get('pharmacy', 'Web\PharmacyWebController::index');
+    $routes->get('pharmacy/export', 'Web\PharmacyWebController::export');
+    $routes->get('pharmacy/receipts', 'Web\PharmacyWebController::receipts');
+    $routes->get('pharmacy/held-sales', 'Web\PharmacyWebController::heldSales');
+    $routes->get('pharmacy/storage/data', 'Web\PharmacyWebController::storageData');
+    $routes->get('pharmacy/import/template', 'Web\PharmacyWebController::importTemplate');
+    $routes->get('pharmacy/counts/data', 'Web\PharmacyWebController::countList');
+    $routes->get('pharmacy/counts/(:num)', 'Web\PharmacyWebController::countDetail/$1');
+    $routes->post('pharmacy/prescriptions/(:num)/documents', 'Web\PharmacyWebController::prescriptionUpload/$1');
+    $routes->get('pharmacy/documents/(:num)', 'Web\PharmacyWebController::prescriptionDownload/$1');
+    $routes->get('pharmacy/batches/(:num)/trace', 'Web\PharmacyWebController::batchTrace/$1');
+    $routes->get('pharmacy/lookup/(:segment)', 'Web\PharmacyWebController::partyLookup/$1');
+    $routes->get('pharmacy/availability', 'Web\PharmacyWebController::availability');
+    $routes->get('pharmacy/patients/(:num)/history', 'Web\PharmacyWebController::patientHistory/$1');
+    $routes->get('pharmacy/receipt/(:num)', 'Web\PharmacyWebController::receipt/$1');
+    $routes->get('pharmacy/labels/(:num)', 'Web\PharmacyWebController::labels/$1');
+    $routes->get('pharmacy/prescriptions/(:num)', 'Web\PharmacyWebController::prescription/$1');
+    $routes->get('pharmacy/(:segment)', 'Web\PharmacyWebController::index/$1');
+    $routes->post('pharmacy/(:segment)/save', 'Web\PharmacyWebController::save/$1');
+    $routes->get('web/imports/(:segment)/template', 'Web\WorkbookImportsController::template/$1');
+    $routes->post('web/imports/(:segment)', 'Web\WorkbookImportsController::upload/$1');
+    $routes->get('/', static fn () => redirect()->to('workspace'));
+    $routes->get('workspace', 'Web\WorkspaceController::index');
+    $routes->get('workspace/(:segment)', 'Web\WorkspaceController::index/$1');
+    $routes->get('dashboard', 'Web\WorkspaceController::index');
+    $routes->get('dashboard/data', 'Web\DashboardController::data');
+    $routes->get('dashboard/orders/(:num)', 'Web\DashboardController::order/$1');
+    $routes->post('web/printing/sales/(:num)', 'Web\PrintingWebController::sale/$1');
+    $routes->post('web/printing/receipts/(:num)', 'Web\PrintingWebController::receipt/$1');
+    $routes->get('web/printing/signing', 'Web\PrintingWebController::signing');
+    $routes->post('web/printing/signing', 'Web\PrintingWebController::saveSigning');
+    $routes->post('web/printing/sign', 'Web\PrintingWebController::sign');
+    $routes->post('web/printing/events', 'Web\PrintingWebController::event');
+    $routes->post('web/printing/test', 'Web\PrintingWebController::test');
+
+    // Phase 2 Web Routes: Financial Management, Users & Roles, Settings
+    $routes->get('finance', 'Web\FinanceWebController::index/accounts');
+    $routes->get('finance/taxes', 'Web\TaxesWebController::index');
+    $routes->post('finance/taxes/save', 'Web\TaxesWebController::save');
+    $routes->get('finance/journals/new', 'Web\FinanceWebController::newJournal');
+    $routes->get('finance/receipts/orders/(:num)', 'Web\FinanceWebController::receiptInvoice/$1');
+    $routes->get('finance/receipts/details/(:num)', 'Web\FinanceWebController::receiptDetails/$1');
+    $routes->post('finance/receipts/save', 'Web\FinanceWebController::saveCustomerReceipt');
+    $routes->post('finance/supplier-payments/save', 'Web\FinanceWebController::saveSupplierPayment');
+    $routes->post('finance/receipts/(:num)/void', 'Web\FinanceWebController::voidCustomerReceipt/$1');
+    $routes->post('finance/periods/save', 'Web\FinanceWebController::savePeriod');
+    $routes->post('finance/periods/(:num)/(:segment)', 'Web\FinanceWebController::changePeriod/$1/$2');
+    $routes->get('finance/accounts/group/(:segment)', 'Web\FinanceWebController::accountGroup/$1');
+    $routes->post('finance/accounts/create', 'Web\FinanceWebController::createAccount');
+    $routes->get('finance/accounts/group', 'Web\FinanceWebController::accountGroup');
+    $routes->get('finance/pos-methods/data', 'Web\FinanceWebController::paymentMethods');
+    $routes->post('finance/pos-methods/reorder', 'Web\FinanceWebController::reorderPaymentMethods');
+    $routes->post('finance/pos-methods/save', 'Web\FinanceWebController::savePosPaymentMethod');
+    $routes->post('finance/pos-methods/toggle/(:num)', 'Web\FinanceWebController::togglePosPaymentMethod/$1');
+    $routes->post('finance/pos-methods/delete/(:num)', 'Web\FinanceWebController::deletePosPaymentMethod/$1');
+    $routes->get('finance/bills', static fn () => redirect()->to(site_url('suppliers/bills')));
+    $routes->get('finance/payments', static fn () => redirect()->to(site_url('suppliers/payments')));
+    $routes->get('finance/(:segment)', 'Web\FinanceWebController::index/$1');
+    $routes->get('users', 'Web\UsersWebController::index');
+    $routes->get('users/roles', 'Web\RolesWebController::index');
+    $routes->post('users/roles/create', 'Web\RolesWebController::create');
+    $routes->get('users/audit', 'Web\AuditWebController::index');
+    $routes->get('audit', 'Web\AuditWebController::index');
+    $routes->get('settings', 'Web\SettingsWebController::index');
+    $routes->get('settings/operational', 'Web\SettingsWebController::operational');
+    $routes->post('settings/save', 'Web\SettingsWebController::save');
+    $routes->post('settings/printer', 'Web\SettingsWebController::printer');
+    $routes->post('finance/receipts/(:num)/print', 'Web\FinanceWebController::printCustomerReceipt/$1');
+    $routes->post('settings/logo', 'Web\SettingsWebController::logo');
+
+    // Phase 3 Web Routes: Supplier Management & Inventory Management
+    $routes->get('suppliers', 'Web\SuppliersWebController::index');
+    $routes->get('suppliers/returns', 'Web\ReturnsWebController::index/purchase');
+    $routes->get('suppliers/returns/source/(:num)', 'Web\ReturnsWebController::source/purchase/$1');
+    $routes->get('suppliers/returns/details/(:num)', 'Web\ReturnsWebController::details/purchase/$1');
+    $routes->post('suppliers/returns/quote/(:num)', 'Web\ReturnsWebController::quote/purchase/$1');
+    $routes->post('suppliers/returns/save/(:num)', 'Web\ReturnsWebController::save/purchase/$1');
+    $routes->post('suppliers/purchases/save', 'Web\SuppliersWebController::savePurchase');
+    $routes->get('suppliers/(:num)/statement', 'Web\SuppliersWebController::statement/$1');
+    $routes->get('suppliers/purchases', 'Web\SuppliersWebController::purchases');
+    $routes->get('suppliers/receiving', 'Web\SuppliersWebController::receiving');
+    $routes->get('suppliers/bills', 'Web\FinanceWebController::index/bills');
+    $routes->get('suppliers/payments', 'Web\FinanceWebController::index/payments');
+    $routes->get('suppliers/(:segment)', 'Web\SuppliersWebController::index');
+
+    $routes->get('inventory/selling-options', 'Web\InventoryWebController::sellingOptions');
+    $routes->post('inventory/selling-options/save', 'Web\InventoryWebController::saveSellingOptions');
+    $routes->get('inventory/categories/data', 'Web\InventoryWebController::categoryData');
+    $routes->post('inventory/categories/create', 'Web\InventoryWebController::createCategory');
+    $routes->post('inventory/categories/delete/(:num)', 'Web\InventoryWebController::deleteCategory/$1');
+    $routes->post('inventory/categories/update/(:num)', 'Web\InventoryWebController::updateCategory/$1');
+    $routes->get('inventory/products/data', 'Web\InventoryWebController::productData');
+    $routes->post('inventory/products/save', 'Web\InventoryWebController::saveProduct');
+    $routes->get('inventory', 'Web\InventoryWebController::products');
+    $routes->get('inventory/products', 'Web\InventoryWebController::products');
+    $routes->get('inventory/categories', 'Web\InventoryWebController::categories');
+    $routes->post('inventory/stock/open-package', 'Web\InventoryWebController::openPackage');
+    $routes->post('inventory/stock/adjust', 'Web\InventoryWebController::adjustStock');
+    $routes->get('inventory/stock', 'Web\InventoryWebController::stock');
+    $routes->get('inventory/adjustments', 'Web\InventoryWebController::adjustments');
+    $routes->get('inventory/(:segment)', 'Web\InventoryWebController::products');
+
+    // Phase 4 Web Routes: Sales, POS & Client Management
+    $routes->get('pos', 'Web\PharmacyWebController::index/dispense');
+    $routes->get('sales/pos', 'Web\PharmacyWebController::index/dispense');
+    $routes->get('sales/pos/stock-data', 'Web\PosWebController::stockData');
+    $routes->get('sales/pos/scan', 'Web\PosWebController::scan');
+    $routes->post('sales/pos/checkout', 'Web\PosWebController::checkout');
+    $routes->get('sales', 'Web\SalesWebController::index');
+    $routes->get('sales/returns', 'Web\ReturnsWebController::index/sale');
+    $routes->get('sales/returns/source/(:num)', 'Web\ReturnsWebController::source/sale/$1');
+    $routes->get('sales/returns/details/(:num)', 'Web\ReturnsWebController::details/sale/$1');
+    $routes->post('sales/returns/quote/(:num)', 'Web\ReturnsWebController::quote/sale/$1');
+    $routes->post('sales/returns/save/(:num)', 'Web\ReturnsWebController::save/sale/$1');
+    $routes->get('sales/invoices', 'Web\SalesWebController::index');
+    $routes->get('sales/(:segment)', 'Web\SalesWebController::index');
+
+    $routes->get('clients', 'Web\ClientsWebController::index');
+    $routes->post('clients/create', 'Web\ClientsWebController::save');
+    $routes->post('clients/(:num)/save', 'Web\ClientsWebController::save/$1');
+    $routes->get('clients/(:num)/credit', 'Web\ClientsWebController::credit/$1');
+    $routes->get('clients/receipts', 'Web\FinanceWebController::index/receipts');
+    $routes->get('clients/deposits', 'Web\ClientsWebController::deposits');
+    $routes->get('clients/statements', static fn () => redirect()->to(site_url('clients')));
+    $routes->get('clients/(:num)/statement', 'Web\ClientsWebController::statement/$1');
+    $routes->get('clients/(:num)/statement/data', 'Web\ClientsWebController::statementData/$1');
+
+    // Phase 5: Reports & Analytics Hub
+    $routes->get('reports', 'Web\ReportsWebController::index');
+    $routes->get('reports/(:segment)/data', 'Web\ReportsWebController::data/$1');
+    $routes->get('reports/(:segment)', 'Web\ReportsWebController::index/$1');
+
+    // Shortcuts & Backward Compatibility Aliases
+    $routes->get('catalog', 'Web\InventoryWebController::products');
+    $routes->get('catalog/(:segment)', 'Web\InventoryWebController::products');
+    $routes->get('stock', 'Web\InventoryWebController::stock');
+    $routes->get('stock/(:segment)', 'Web\InventoryWebController::stock');
+    $routes->get('expenses', 'Web\ModuleController::render/expenses');
+    $routes->get('expenses/(:segment)', 'Web\ModuleController::render/expenses/$1');
+    $routes->get('team', 'Web\UsersWebController::index');
+    $routes->get('team/(:segment)', 'Web\UsersWebController::index');
+});
 
 $routes->group('api/v1', ['namespace' => 'App\Controllers'], static function (RouteCollection $routes) {
 
@@ -28,6 +181,13 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers'], static function (Ro
         $routes->get('sales', 'Pos\SalesController::index');
         $routes->post('sales', 'Pos\SalesController::create');
         $routes->get('sales/(:num)', 'Pos\SalesController::show/$1');
+        $routes->post('sales/(:num)/print', 'Pos\SalesController::printReceipt/$1');
+        $routes->get('sales/(:num)/escpos', 'Pos\SalesController::escposStream/$1');
+
+        // Thermal Printer Hardware API (escpos-php)
+        $routes->get('printer/settings', 'Pos\SalesController::getPrinterSettings');
+        $routes->post('printer/settings', 'Pos\SalesController::savePrinterSettings');
+        $routes->post('printer/test', 'Pos\SalesController::testPrinter');
 
         // Catalog
         $routes->get('products', 'Pos\ProductsController::index');
@@ -98,6 +258,16 @@ $routes->group('api/v1', ['namespace' => 'App\Controllers'], static function (Ro
         $routes->put('roles/(:num)', 'Admin\RolesController::update/$1');
         $routes->delete('roles/(:num)', 'Admin\RolesController::delete/$1');
         $routes->get('permissions', 'Admin\RolesController::permissions');
+
+        // Granular Sidebar Menu Permissions by Role or User
+        $routes->get('menu-permissions/role/(:num)', 'Admin\MenuPermissionsController::getRole/$1');
+        $routes->put('menu-permissions/role/(:num)', 'Admin\MenuPermissionsController::updateRole/$1');
+        $routes->get('menu-permissions/user/(:num)', 'Admin\MenuPermissionsController::getUser/$1');
+        $routes->put('menu-permissions/user/(:num)', 'Admin\MenuPermissionsController::updateUser/$1');
+        $routes->post('menu-permissions/user/(:num)/reset', 'Admin\MenuPermissionsController::resetUser/$1');
+        $routes->get('settings', 'Admin\SettingsController::index');
+        $routes->post('settings', 'Admin\SettingsController::update');
+        $routes->put('settings', 'Admin\SettingsController::update');
 
         // Basic dashboard (all plans)
         $routes->get('reports/dashboard', 'Reports\ReportsController::dashboard');

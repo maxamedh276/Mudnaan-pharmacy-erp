@@ -49,6 +49,14 @@ class UserModel extends Model
      */
     public function permissionCodes(int $roleId): array
     {
+        $role = $this->db->table('roles')->where('id', $roleId)->get()->getRowArray();
+        if (\App\Libraries\AdministrativeAccess::isFixedRole($role['name'] ?? '')) {
+            $permissions = $this->db->table('permissions')->select('code');
+            if (!\App\Libraries\AdministrativeAccess::isSuperadminRole($role['name'])) {
+                $permissions->where('code !=', 'settings.operational');
+            }
+            return array_column($permissions->get()->getResultArray(), 'code');
+        }
         $rows = $this->db->table('role_permissions')
             ->select('permissions.code')
             ->join('permissions', 'permissions.id = role_permissions.permission_id')
@@ -56,6 +64,6 @@ class UserModel extends Model
             ->get()
             ->getResultArray();
 
-        return array_column($rows, 'code');
+        return array_values(array_diff(array_column($rows, 'code'), ['settings.operational']));
     }
 }

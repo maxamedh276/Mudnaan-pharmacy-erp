@@ -33,7 +33,7 @@ class ReportService
         )->getRowArray();
 
         $costToday = $database->query(
-            "SELECT COALESCE(SUM(si.quantity * p.cost_price), 0) AS cost
+            "SELECT COALESCE(SUM(COALESCE(si.cost_total, si.quantity * si.stock_factor * p.cost_price)), 0) AS cost
              FROM sale_items si
              JOIN sales s ON s.id = si.sale_id
              JOIN products p ON p.id = si.product_id
@@ -42,12 +42,13 @@ class ReportService
             [$branchId, $today, $today],
         )->getRowArray();
 
+        $reorderStock = PackageInventoryService::reorderExpression('p','sl',$branchId);
         $stockAlerts = $database->query(
-            'SELECT SUM(CASE WHEN sl.quantity <= 0 THEN 1 ELSE 0 END) AS out_of_stock,
-                    SUM(CASE WHEN sl.quantity > 0 AND sl.quantity <= p.reorder_level THEN 1 ELSE 0 END) AS low_stock
+            "SELECT SUM(CASE WHEN sl.quantity <= 0 THEN 1 ELSE 0 END) AS out_of_stock,
+                    SUM(CASE WHEN ($reorderStock) <= p.reorder_level THEN 1 ELSE 0 END) AS low_stock
              FROM stock_levels sl
              JOIN products p ON p.id = sl.product_id AND p.deleted_at IS NULL
-             WHERE sl.branch_id = ?',
+             WHERE sl.branch_id = ?",
             [$branchId],
         )->getRowArray();
 
@@ -110,7 +111,7 @@ class ReportService
         )->getRowArray();
 
         $cost = $database->query(
-            "SELECT COALESCE(SUM(si.quantity * p.cost_price), 0) AS cost
+            "SELECT COALESCE(SUM(COALESCE(si.cost_total, si.quantity * si.stock_factor * p.cost_price)), 0) AS cost
              FROM sale_items si
              JOIN sales s ON s.id = si.sale_id
              JOIN products p ON p.id = si.product_id
@@ -393,7 +394,7 @@ class ReportService
                     COALESCE(billed.total, 0) - COALESCE(paid.total, 0) AS payable
              FROM suppliers s
              LEFT JOIN (
-                 SELECT supplier_id, SUM(total) AS total FROM supplier_bills
+                 SELECT supplier_id, SUM(total + refunded_total) AS total FROM supplier_bills
                  WHERE branch_id = ? AND deleted_at IS NULL AND status != 'cancelled'
                  GROUP BY supplier_id
              ) billed ON billed.supplier_id = s.id

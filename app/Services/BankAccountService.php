@@ -79,41 +79,48 @@ class BankAccountService
         $glPrefix = self::GL_PREFIXES[$type];
 
         $database = db_connect();
-        $database->transException(true)->transStart();
+        if (! $database->transException(true)->transBegin()) {
+            throw new \RuntimeException('TRANSACTION_FAILED');
+        }
+        try {
+            // 1) A dedicated GL account under Current Assets: next 10xx code.
+            $maxCode = $database->query(
+                "SELECT MAX(CAST(code AS UNSIGNED)) AS max_code
+                 FROM accounts WHERE code REGEXP '^10[0-9][0-9]$'",
+            )->getRowArray();
 
-        // 1) A dedicated GL account under Current Assets: next 10xx code.
-        $maxCode = $database->query(
-            "SELECT MAX(CAST(code AS UNSIGNED)) AS max_code
-             FROM accounts WHERE code REGEXP '^10[0-9][0-9]$'",
-        )->getRowArray();
+            $glCode = (string) (max(1010, (int) $maxCode['max_code']) + 1);
 
-        $glCode = (string) (max(1010, (int) $maxCode['max_code']) + 1);
+            $database->query(
+                "INSERT INTO accounts (account_group_id, code, name, is_system)
+                 SELECT id, ?, ?, 0 FROM account_groups WHERE code = 'CA'",
+                [$glCode, $glPrefix . $name],
+            );
 
-        $database->query(
-            "INSERT INTO accounts (account_group_id, code, name, is_system)
-             SELECT id, ?, ?, 0 FROM account_groups WHERE code = 'CA'",
-            [$glCode, $glPrefix . $name],
-        );
+            $glAccountId = (int) $database->insertID();
 
-        $glAccountId = (int) $database->insertID();
+            // 2) The money account row itself (a cash till or a bank/wallet).
+            $database->table('bank_accounts')->insert([
+                'account_id'      => $glAccountId,
+                'type'            => $type,
+                'name'            => $name,
+                'bank_name'       => $type === 'bank' ? ($data['bank_name'] ?? null) : null,
+                'account_number'  => $type === 'bank' ? ($data['account_number'] ?? null) : null,
+                'currency'        => $data['currency'] ?? 'USD',
+                'opening_balance' => $openingBalance,
+            ]);
 
-        // 2) The money account row itself (a cash till or a bank/wallet).
-        $database->table('bank_accounts')->insert([
-            'account_id'      => $glAccountId,
-            'type'            => $type,
-            'name'            => $name,
-            'bank_name'       => $type === 'bank' ? ($data['bank_name'] ?? null) : null,
-            'account_number'  => $type === 'bank' ? ($data['account_number'] ?? null) : null,
-            'currency'        => $data['currency'] ?? 'USD',
-            'opening_balance' => $openingBalance,
-        ]);
+            $bankAccountId = (int) $database->insertID();
 
-        $bankAccountId = (int) $database->insertID();
-
-        // 3) The opening money, on the books.
-        $this->accounting->postBankOpening($branchId, $glAccountId, $openingBalance, $name, $userId);
-
-        $database->transComplete();
+            // 3) The opening money, on the books.
+            $this->accounting->postBankOpening($branchId, $glAccountId, $openingBalance, $name, $userId);
+            if (! $database->transStatus() || ! $database->transCommit()) {
+                throw new \RuntimeException('TRANSACTION_FAILED');
+            }
+        } catch (\Throwable $exception) {
+            $database->transRollback();
+            throw $exception;
+        }
 
         AuditService::log('bank_account.create', 'banking', 'bank_accounts', $bankAccountId, details: [
             'gl_code' => $glCode, 'opening' => $openingBalance,

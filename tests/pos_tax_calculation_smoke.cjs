@@ -1,0 +1,15 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync('app/Views/web/pos/index.php','utf8');
+const start=source.indexOf('        function calculateSubtotal()'),end=source.indexOf('        function handleFinancialInputChange()',start);
+const fields={posInputVat:{value:'0'},posInputDiscount:{value:'0'},posInputShipping:{value:'0'},posInputPaid:{value:'0'},posTaxLabel:{textContent:''}};
+const context={POS:{cart:[{id:1,price:100,qty:1}],activeTax:{id:1,name:'VAT',percentage:'5'},productTaxRates:{1:20}},document:{getElementById:id=>fields[id]}};
+vm.runInNewContext(source.slice(start,end),context);
+assert.equal(context.getFinancialValues().vat,5);assert.equal(context.getFinancialValues().grandTotal,105);
+assert.equal(fields.posInputVat.value,'5.00');assert(fields.posTaxLabel.textContent.includes('5.00%'));
+context.POS.activeTax.percentage=0;assert.equal(context.getFinancialValues().grandTotal,100);
+context.POS.activeTax=null;assert.equal(context.getFinancialValues().vat,20);
+context.POS.activeTax={id:2,name:'Tax',percentage:7.5};context.POS.cart=[{id:1,price:0.33,qty:3},{id:2,price:2.25,qty:1}];
+fields.posInputDiscount.value='0.24';fields.posInputShipping.value='1';
+const value=context.getFinancialValues();assert.equal(value.total,3.24);assert.equal(value.vat,0.24);assert.equal(value.grandTotal,4.24);
+assert(source.includes('tax_id: POS.activeTax'));assert(source.includes('POS.activeTax = res.activeTax'));
+console.log('PASS: POS calculates active percentage per line, supports zero/legacy rates, rounds totals and refreshes stale tax without losing the cart.');

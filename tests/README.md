@@ -116,3 +116,18 @@ Be sure to modify the test case (or create your own) to point to your seed and m
 and include any additional steps to be run before tests in the `setUp()` method.
 See [Testing Your Database](https://codeigniter.com/user_guide/testing/database.html)
 for details.
+
+## Packaged inventory (sealed and opened stock)
+
+```powershell
+& C:\xampp\php\php.exe tests/packaged_inventory_smoke.php
+node tests/packaged_inventory_ui_smoke.cjs
+```
+
+The PHP suite runs 98 checks in connection-local temporary tables and fingerprints original records. It covers rice/oil purchases, partial receipts, manual opening, fractional and sealed sales, shortage recovery, returns, retries, permissions and accounting rollback. Test source remains in the repository. See [the workflow and preview instructions](../docs/PACKAGED_INVENTORY.md).
+
+## Simplified inventory workflow
+
+Run `C:\xampp\php\php.exe tests/inventory_workflow_smoke.php` for opening balances, sealed/opened adjustments, managed selling options and low-stock rules. See [production SQL and workflow instructions](../docs/INVENTORY_WORKFLOW_DEPLOYMENT.md). All writes use temporary tables; test sources are retained.
+
+Developer reference: [Inventory and POS architecture, request flows and invariants](../docs/INVENTORY_POS_DEVELOPER_GUIDE.md).

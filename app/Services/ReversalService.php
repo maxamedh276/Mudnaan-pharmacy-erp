@@ -32,36 +32,34 @@ class ReversalService
      */
     public function voidPurchase(int $purchaseId, int $branchId, string $reason, int $userId): array
     {
-        $database = db_connect();
+        return FinancialTransaction::run(function ($database) use ($purchaseId, $branchId, $reason, $userId): array {
+            $purchase = $database->query('SELECT * FROM purchases WHERE id = ? AND branch_id = ? FOR UPDATE', [$purchaseId, $branchId])->getRowArray();
 
-        $purchase = $database->table('purchases')
-            ->where('id', $purchaseId)->where('branch_id', $branchId)
-            ->get()->getRowArray();
+            if ($purchase === null) {
+                throw new InvalidArgumentException('PURCHASE_NOT_FOUND');
+            }
+            if ($purchase['status'] === 'cancelled') {
+                throw new InvalidArgumentException('ALREADY_CANCELLED');
+            }
+            if ($purchase['status'] !== 'pending') {
+                throw new InvalidArgumentException('ALREADY_RECEIVING');
+            }
 
-        if ($purchase === null) {
-            throw new InvalidArgumentException('PURCHASE_NOT_FOUND');
-        }
-        if ($purchase['status'] === 'cancelled') {
-            throw new InvalidArgumentException('ALREADY_CANCELLED');
-        }
-        if ($purchase['status'] !== 'pending') {
-            throw new InvalidArgumentException('ALREADY_RECEIVING');
-        }
+            $database->table('purchases')->where('id', $purchaseId)
+                ->update(['status' => 'cancelled']);
 
-        $database->table('purchases')->where('id', $purchaseId)
-            ->update(['status' => 'cancelled']);
+            AuditService::log(
+                'purchase.void',
+                'purchases',
+                'purchases',
+                $purchaseId,
+                before: ['status' => $purchase['status']],
+                after: ['status' => 'cancelled'],
+                details: ['reason' => $reason],
+            );
 
-        AuditService::log(
-            'purchase.void',
-            'purchases',
-            'purchases',
-            $purchaseId,
-            before: ['status' => $purchase['status']],
-            after: ['status' => 'cancelled'],
-            details: ['reason' => $reason],
-        );
-
-        return ['id' => $purchaseId, 'status' => 'cancelled'];
+            return ['id' => $purchaseId, 'status' => 'cancelled'];
+        });
     }
 
     /**
@@ -72,37 +70,40 @@ class ReversalService
     {
         $database = db_connect();
 
-        $payment = $database->table('supplier_payments')
-            ->where('id', $paymentId)->where('branch_id', $branchId)
-            ->get()->getRowArray();
-
-        if ($payment === null) {
-            throw new InvalidArgumentException('PAYMENT_NOT_FOUND');
+        if (! $database->transException(true)->transBegin()) {
+            throw new \RuntimeException('TRANSACTION_FAILED');
         }
-        if ($payment['status'] === 'cancelled') {
-            throw new InvalidArgumentException('ALREADY_CANCELLED');
-        }
-        $this->assertPeriodOpen(substr((string) $payment['paid_at'], 0, 10));
+        try {
+            $payment = $database->query('SELECT * FROM supplier_payments WHERE id = ? AND branch_id = ? FOR UPDATE', [$paymentId, $branchId])->getRowArray();
 
-        $database->transException(true)->transStart();
+            if ($payment === null) {
+                throw new InvalidArgumentException('PAYMENT_NOT_FOUND');
+            }
+            if ($payment['status'] === 'cancelled') {
+                throw new InvalidArgumentException('ALREADY_CANCELLED');
+            }
+            $this->assertPeriodOpen(substr((string) $payment['paid_at'], 0, 10));
 
-        if ($plan === 'premium') {
             $this->accounting->reverseSource('supplier_payment', $paymentId, $branchId, $userId);
+
+            // Restore the bill it settled.
+            if (! empty($payment['bill_id'])) {
+                $this->rollBackBill((int) $payment['bill_id'], (float) $payment['amount']);
+            }
+
+            $database->table('supplier_payments')->where('id', $paymentId)->update([
+                'status'      => 'cancelled',
+                'voided_at'   => date('Y-m-d H:i:s'),
+                'voided_by'   => $userId,
+                'void_reason' => $reason,
+            ]);
+            if (! $database->transStatus() || ! $database->transCommit()) {
+                throw new \RuntimeException('TRANSACTION_FAILED');
+            }
+        } catch (\Throwable $exception) {
+            $database->transRollback();
+            throw $exception;
         }
-
-        // Restore the bill it settled.
-        if (! empty($payment['bill_id'])) {
-            $this->rollBackBill((int) $payment['bill_id'], (float) $payment['amount']);
-        }
-
-        $database->table('supplier_payments')->where('id', $paymentId)->update([
-            'status'      => 'cancelled',
-            'voided_at'   => date('Y-m-d H:i:s'),
-            'voided_by'   => $userId,
-            'void_reason' => $reason,
-        ]);
-
-        $database->transComplete();
 
         AuditService::log(
             'supplier_payment.void',
@@ -124,68 +125,46 @@ class ReversalService
      */
     public function voidCustomerReceipt(int $receiptId, int $branchId, string $reason, int $userId, string $plan): array
     {
-        $database = db_connect();
-
-        $receipt = $database->table('customer_receipts')
-            ->where('id', $receiptId)->where('branch_id', $branchId)
-            ->get()->getRowArray();
-
-        if ($receipt === null) {
-            throw new InvalidArgumentException('RECEIPT_NOT_FOUND');
-        }
-        if ($receipt['status'] === 'cancelled') {
-            throw new InvalidArgumentException('ALREADY_CANCELLED');
-        }
-        $this->assertPeriodOpen(substr((string) $receipt['received_at'], 0, 10));
-
-        $database->transException(true)->transStart();
-
-        if ($plan === 'premium') {
+        return FinancialTransaction::run(function ($database) use ($receiptId, $branchId, $reason, $userId): array {
+            $receipt = $database->table('customer_receipts')->where('id', $receiptId)->where('branch_id', $branchId)->get()->getRowArray();
+            if ($receipt === null) {
+                throw new InvalidArgumentException('RECEIPT_NOT_FOUND');
+            }
+            $database->query('SELECT id FROM customers WHERE id = ? FOR UPDATE', [(int) $receipt['customer_id']]);
+            $receipt = $database->query('SELECT * FROM customer_receipts WHERE id = ? AND branch_id = ? FOR UPDATE', [$receiptId, $branchId])->getRowArray();
+            if ($receipt['status'] === 'cancelled') {
+                throw new InvalidArgumentException('ALREADY_CANCELLED');
+            }
+            $this->assertPeriodOpen(substr((string) $receipt['received_at'], 0, 10));
+            // Reverse existing postings even if the tenant has since changed plan.
             $this->accounting->reverseSource('customer_receipt', $receiptId, $branchId, $userId);
-        }
-
-        // The receipt cleared received + any waived discount off the due.
-        $settled = round((float) $receipt['amount'] + (float) ($receipt['discount'] ?? 0), 2);
-
-        // Restore the invoice (and its linked sale) it settled.
-        if (! empty($receipt['invoice_id'])) {
-            $this->rollBackInvoice((int) $receipt['invoice_id'], $settled);
-        }
-
-        // Money in had reduced what the customer owed; undo that.
-        $database->table('customers')->where('id', (int) $receipt['customer_id'])
-            ->set('balance', 'balance - ' . $settled, false)->update();
-
-        $database->table('customer_receipts')->where('id', $receiptId)->update([
-            'status'      => 'cancelled',
-            'voided_at'   => date('Y-m-d H:i:s'),
-            'voided_by'   => $userId,
-            'void_reason' => $reason,
-        ]);
-
-        $database->transComplete();
-
-        AuditService::log(
-            'customer_receipt.void',
-            'receivables',
-            'customer_receipts',
-            $receiptId,
-            before: ['status' => 'active', 'amount' => $receipt['amount']],
-            after: ['status' => 'cancelled'],
-            details: ['reason' => $reason],
-        );
-
-        return ['id' => $receiptId, 'status' => 'cancelled'];
+            $settled = round((float) $receipt['amount'] + (float) ($receipt['discount'] ?? 0), 2);
+            foreach ($database->table('customer_receipt_allocations')->where('receipt_id', $receiptId)->get()->getResultArray() as $allocation) {
+                $this->rollBackInvoice((int)$allocation['invoice_id'], round((float)$allocation['amount']+(float)$allocation['discount'],2));
+            }
+            if (! empty($receipt['invoice_id'])) {
+                $this->rollBackInvoice((int) $receipt['invoice_id'], $settled);
+            }
+            $database->table('customers')->where('id', (int) $receipt['customer_id'])
+                ->set('balance', 'balance - ' . $settled, false)->update();
+            $database->table('customer_receipts')->where('id', $receiptId)->update([
+                'status' => 'cancelled', 'voided_at' => date('Y-m-d H:i:s'),
+                'voided_by' => $userId, 'void_reason' => $reason,
+            ]);
+            AuditService::log('customer_receipt.void', 'receivables', 'customer_receipts', $receiptId,
+                before: ['status' => 'active', 'amount' => $receipt['amount']],
+                after: ['status' => 'cancelled'], details: ['reason' => $reason]);
+            return ['id' => $receiptId, 'status' => 'cancelled'];
+        });
     }
 
     private function rollBackBill(int $billId, float $amount): void
     {
         $database = db_connect();
-        $bill     = $database->table('supplier_bills')->where('id', $billId)->get()->getRowArray();
+        $bill     = $database->query('SELECT * FROM supplier_bills WHERE id = ? FOR UPDATE', [$billId])->getRowArray();
 
-        if ($bill === null) {
-            return;
-        }
+        if ($bill === null) throw new InvalidArgumentException('BILL_NOT_FOUND');
+        if (round((float)$bill['paid_total']-$amount,2)<0) throw new InvalidArgumentException('INCONSISTENT_BALANCE');
 
         $newPaid = max(0, round((float) $bill['paid_total'] - $amount, 2));
         $database->table('supplier_bills')->where('id', $billId)->update([
@@ -197,12 +176,13 @@ class ReversalService
     private function rollBackInvoice(int $invoiceId, float $amount): void
     {
         $database = db_connect();
-        $invoice  = $database->table('customer_invoices')->where('id', $invoiceId)->get()->getRowArray();
+        $invoice  = $database->query('SELECT * FROM customer_invoices WHERE id = ? FOR UPDATE', [$invoiceId])->getRowArray();
 
         if ($invoice === null) {
-            return;
+            throw new InvalidArgumentException('INVOICE_NOT_FOUND');
         }
 
+        if (round((float)$invoice['paid_total']-$amount,2)<0) throw new InvalidArgumentException('INCONSISTENT_BALANCE');
         $newPaid = max(0, round((float) $invoice['paid_total'] - $amount, 2));
         $status  = $newPaid <= 0 ? 'unpaid' : 'partial';
 

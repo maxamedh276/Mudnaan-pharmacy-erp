@@ -28,7 +28,7 @@ class FinancialReportService
              JOIN account_types t  ON t.id = g.account_type_id
              LEFT JOIN journal_entry_lines l ON l.account_id = a.id
                   AND l.journal_entry_id IN (
-                      SELECT id FROM journal_entries WHERE status = 'posted' AND entry_date <= ?)
+                      SELECT id FROM journal_entries WHERE status IN ('posted','void') AND entry_date <= ?)
              WHERE a.deleted_at IS NULL
              GROUP BY a.id, a.code, a.name, t.normal_balance, t.sort_order
              ORDER BY a.code",
@@ -130,13 +130,7 @@ class FinancialReportService
     {
         $database = db_connect();
 
-        // Cash on Hand + every bank-backed account.
-        $accountIds = $database->query(
-            "SELECT a.id FROM accounts a WHERE a.deleted_at IS NULL
-             AND (a.code = '1000' OR a.id IN (SELECT account_id FROM bank_accounts WHERE deleted_at IS NULL))",
-        )->getResultArray();
-
-        $ids = array_column($accountIds, 'id');
+        $ids = (new ReceiptCashAccountService())->moneyAccountIds();
         if ($ids === []) {
             return ['period' => ['from' => $from, 'to' => $to], 'opening' => 0, 'inflow' => 0, 'outflow' => 0, 'closing' => 0];
         }
@@ -146,16 +140,18 @@ class FinancialReportService
         $opening = (float) ($database->query(
             "SELECT COALESCE(SUM(l.debit - l.credit),0) v FROM journal_entry_lines l
              JOIN journal_entries e ON e.id = l.journal_entry_id
-             WHERE e.status='posted' AND e.entry_date < ? AND l.account_id IN ($in)",
+             WHERE e.status IN ('posted','void') AND e.entry_date < ? AND l.account_id IN ($in)",
             [$from],
         )->getRow()->v);
 
+        // Net per entry excludes transfers between two money accounts.
         $flow = $database->query(
-            "SELECT COALESCE(SUM(l.debit),0) inflow, COALESCE(SUM(l.credit),0) outflow
-             FROM journal_entry_lines l
-             JOIN journal_entries e ON e.id = l.journal_entry_id
-             WHERE e.status='posted' AND e.entry_date BETWEEN ? AND ? AND l.account_id IN ($in)",
-            [$from, $to],
+            "SELECT COALESCE(SUM(GREATEST(n,0)),0) inflow, COALESCE(SUM(GREATEST(-n,0)),0) outflow FROM (
+                SELECT e.id,SUM(l.debit-l.credit) n FROM journal_entry_lines l
+                JOIN journal_entries e ON e.id=l.journal_entry_id
+                WHERE e.status IN ('posted','void') AND e.entry_date BETWEEN ? AND ? AND l.account_id IN ($in)
+                GROUP BY e.id
+            ) cash_movements", [$from,$to],
         )->getRowArray();
 
         $inflow  = (float) $flow['inflow'];
@@ -184,7 +180,7 @@ class FinancialReportService
              JOIN accounts a ON a.id = l.account_id
              JOIN account_groups g ON g.id = a.account_group_id
              JOIN account_types t  ON t.id = g.account_type_id
-             WHERE e.status='posted' AND e.entry_date BETWEEN ? AND ?
+             WHERE e.status IN ('posted','void') AND e.entry_date BETWEEN ? AND ?
              ORDER BY a.code, e.entry_date, e.id",
             [$from, $to],
         )->getResultArray();
@@ -241,7 +237,7 @@ class FinancialReportService
         $opening = (float) ($database->query(
             "SELECT COALESCE(SUM(l.debit - l.credit),0) v FROM journal_entry_lines l
              JOIN journal_entries e ON e.id = l.journal_entry_id
-             WHERE e.status='posted' AND e.entry_date < ? AND l.account_id = ?",
+             WHERE e.status IN ('posted','void') AND e.entry_date < ? AND l.account_id = ?",
             [$from, $accountId],
         )->getRow()->v);
 
@@ -249,7 +245,7 @@ class FinancialReportService
             "SELECT e.entry_no, e.entry_date, e.description, l.debit, l.credit
              FROM journal_entry_lines l
              JOIN journal_entries e ON e.id = l.journal_entry_id
-             WHERE e.status='posted' AND e.entry_date BETWEEN ? AND ? AND l.account_id = ?
+             WHERE e.status IN ('posted','void') AND e.entry_date BETWEEN ? AND ? AND l.account_id = ?
              ORDER BY e.entry_date, e.id",
             [$from, $to, $accountId],
         )->getResultArray();
@@ -295,13 +291,13 @@ class FinancialReportService
         $sign = $side === 'debit' ? 'l.debit - l.credit' : 'l.credit - l.debit';
 
         $rows = db_connect()->query(
-            "SELECT a.code, a.name, COALESCE(SUM($sign), 0) AS amount
+            "SELECT a.code, a.name, COALESCE(SUM(CASE WHEN e.id IS NOT NULL THEN $sign ELSE 0 END), 0) AS amount
              FROM accounts a
              JOIN account_groups g ON g.id = a.account_group_id
              JOIN account_types t  ON t.id = g.account_type_id
              LEFT JOIN journal_entry_lines l ON l.account_id = a.id
              LEFT JOIN journal_entries e ON e.id = l.journal_entry_id
-                  AND e.status = 'posted' AND e.entry_date <= ?" . $fromClause . "
+                  AND e.status IN ('posted','void') AND e.entry_date <= ?" . $fromClause . "
              WHERE t.code = ? AND a.deleted_at IS NULL
              GROUP BY a.id, a.code, a.name, t.sort_order
              HAVING amount <> 0

@@ -38,6 +38,7 @@ class Filters extends BaseFilters
         'performance'   => PerformanceMetrics::class,
         'auth'          => AuthFilter::class,
         'plan'          => PlanFilter::class,
+        'web_auth'      => \App\Filters\WebAuthFilter::class,
     ];
 
     /**

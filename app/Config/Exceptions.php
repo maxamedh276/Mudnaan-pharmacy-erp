@@ -101,6 +101,9 @@ class Exceptions extends BaseConfig
      */
     public function handler(int $statusCode, Throwable $exception): ExceptionHandlerInterface
     {
+        if ($exception instanceof \CodeIgniter\HTTP\Exceptions\HTTPException && $exception->getCode() === 403) {
+            return new \App\Libraries\AuthorizationExceptionHandler($this);
+        }
         return new ExceptionHandler($this);
     }
 }

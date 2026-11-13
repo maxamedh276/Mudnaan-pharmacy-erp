@@ -24,12 +24,15 @@ class Database extends Config
      *
      * @var array<string, mixed>
      */
+    /**
+     * Primary MySQL connection for all web application routes & API requests.
+     */
     public array $default = [
         'DSN'          => '',
         'hostname'     => 'localhost',
-        'username'     => '',
+        'username'     => 'root',
         'password'     => '',
-        'database'     => '',
+        'database'     => 'pharmacy_main',
         'DBDriver'     => 'MySQLi',
         'DBPrefix'     => '',
         'pConnect'     => false,
@@ -158,7 +161,9 @@ class Database extends Config
     //    ];
 
     /**
-     * This database connection is used when running PHPUnit database tests.
+     * This database connection is used ONLY when running automated PHPUnit database tests.
+     * Note: This :memory: SQLite database is strictly for test runner execution (phpunit)
+     * and is NEVER used when running the ERP web application (which runs on MySQL $default above).
      *
      * @var array<string, mixed>
      */

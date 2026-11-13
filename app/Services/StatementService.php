@@ -44,10 +44,11 @@ class StatementService
         // Invoices (credit sales + standalone): debit = total, credit =
         // the part paid at creation (paid_total minus documented receipts).
         $invoices = $database->query(
-            "SELECT ci.id, ci.invoice_no AS ref, ci.invoice_date AS date, ci.total AS debit,
-                    (ci.paid_total - COALESCE(
-                        (SELECT SUM(r.amount) FROM customer_receipts r
-                         WHERE r.invoice_id = ci.id AND r.status = 'active'), 0)) AS credit,
+            "SELECT ci.id, ci.invoice_no AS ref, ci.invoice_date AS date, ci.total+ci.returned_total AS debit,
+                    (ci.paid_total+ci.refunded_total+ci.return_discount_total - COALESCE(
+                        (SELECT SUM(CASE WHEN ra.id IS NULL THEN r.amount+r.discount ELSE ra.amount+ra.discount END) FROM customer_receipts r
+                         LEFT JOIN customer_receipt_allocations ra ON ra.receipt_id=r.id
+                         WHERE COALESCE(ra.invoice_id,r.invoice_id) = ci.id AND r.status = 'active'), 0)) AS credit,
                     'invoice' AS type, ci.status
              FROM customer_invoices ci
              WHERE ci.branch_id = ? AND ci.customer_id = ?
@@ -57,7 +58,7 @@ class StatementService
 
         $receipts = $database->query(
             "SELECT id, receipt_no AS ref, received_at AS date, 0 AS debit,
-                    amount AS credit, 'receipt' AS type, status
+                    (amount + discount) AS credit, 'receipt' AS type, status
              FROM customer_receipts
              WHERE branch_id = ? AND customer_id = ? AND status = 'active'",
             [$branchId, $customerId],
@@ -73,7 +74,7 @@ class StatementService
 
         return $this->assemble(
             $customer['name'],
-            array_merge($sales, $invoices, $receipts, $deposits),
+            array_merge($sales, $invoices, $receipts, $deposits, $this->returns('sale', $customerId, $branchId)),
             $filters,
         );
     }
@@ -106,8 +107,8 @@ class StatementService
         )->getResultArray();
 
         $bills = $database->query(
-            "SELECT b.id, b.bill_no AS ref, b.bill_date AS date, b.total AS debit,
-                    (b.paid_total - COALESCE(
+            "SELECT b.id, b.bill_no AS ref, b.bill_date AS date, b.total+b.returned_total AS debit,
+                    (b.paid_total+b.refunded_total+b.return_discount_total - COALESCE(
                         (SELECT SUM(sp.amount) FROM supplier_payments sp
                          WHERE sp.bill_id = b.id AND sp.status = 'active'), 0)) AS credit,
                     'bill' AS type, b.status
@@ -127,9 +128,14 @@ class StatementService
 
         return $this->assemble(
             $supplier['name'],
-            array_merge($purchases, $bills, $payments),
+            array_merge($purchases, $bills, $payments, $this->returns('purchase', $supplierId, $branchId)),
             $filters,
         );
+    }
+
+    private function returns(string $kind, int $party, int $branch): array
+    {
+        return db_connect()->query("SELECT id,return_no ref,returned_at date,refund+discount_reversal debit,total credit,CONCAT(kind,'_return') type,'posted' status FROM document_returns WHERE kind=? AND party_id=? AND branch_id=?", [$kind, $party, $branch])->getResultArray();
     }
 
     /**
@@ -155,11 +161,12 @@ class StatementService
         $search   = isset($filters['q']) ? mb_strtolower(trim((string) $filters['q'])) : '';
 
         foreach ($rows as $row) {
+            $day = substr((string) $row['date'], 0, 10);
+            // A later credit note/refund must not change an earlier closing statement.
+            if ($dateTo !== null && $dateTo !== '' && $day > $dateTo) continue;
             $debit  = (float) $row['debit'];
             $credit = (float) $row['credit'];
             $running += $debit - $credit;   // running balance spans every event
-
-            $day = substr((string) $row['date'], 0, 10);
 
             if ($dateFrom !== null && $dateFrom !== '' && $day < $dateFrom) {
                 continue;

@@ -12,7 +12,7 @@ class SaleModel extends Model
     protected $useTimestamps = true;
     protected $allowedFields = [
         'uuid', 'branch_id', 'user_id', 'customer_id', 'invoice_no',
-        'subtotal', 'discount', 'tax_total', 'grand_total', 'paid_total',
+        'subtotal', 'discount', 'shipping', 'tax_total', 'grand_total', 'paid_total',
         'status', 'sync_status', 'sold_at',
     ];
 
@@ -25,8 +25,8 @@ class SaleModel extends Model
         $builder = $this->db->table($this->table)
             ->select('sales.id, sales.uuid, sales.invoice_no, sales.customer_id,
                       customers.name AS customer_name, users.name AS cashier_name,
-                      sales.subtotal, sales.discount, sales.tax_total,
-                      sales.grand_total, sales.paid_total, sales.status, sales.sold_at')
+                      sales.subtotal, sales.discount, sales.shipping, sales.tax_total,
+                      sales.grand_total, sales.returned_total, sales.refunded_total, sales.return_discount_total, sales.paid_total, sales.status, sales.sold_at')
             ->join('customers', 'customers.id = sales.customer_id', 'left')
             ->join('users', 'users.id = sales.user_id', 'left')
             ->where('sales.branch_id', $branchId);
@@ -91,7 +91,7 @@ class SaleModel extends Model
 
             return $item;
         }, $this->db->table('sale_items')
-            ->select('id, product_id, description, quantity, unit_price, discount, tax_rate, line_total')
+            ->select('id, product_id, description, quantity, unit_price, discount, tax_rate, line_total, stock_factor, stock_mode, unit_label')
             ->where('sale_id', $saleId)
             ->get()
             ->getResultArray());
@@ -119,6 +119,8 @@ class SaleModel extends Model
         $sale['tax_total']   = (float) $sale['tax_total'];
         $sale['grand_total'] = (float) $sale['grand_total'];
         $sale['paid_total']  = (float) $sale['paid_total'];
+        $sale['returned_total'] = (float)($sale['returned_total'] ?? 0);
+        $sale['net_total'] = round($sale['grand_total'] - $sale['returned_total'], 2);
 
         return $sale;
     }

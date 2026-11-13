@@ -127,6 +127,9 @@ CREATE TABLE supplier_bills (
   tax_total    DECIMAL(14,2) NOT NULL DEFAULT 0.00,
   total        DECIMAL(14,2) NOT NULL DEFAULT 0.00,
   paid_total   DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  returned_total DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  refunded_total DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  return_discount_total DECIMAL(14,2) NOT NULL DEFAULT 0.00,
   status       ENUM('unpaid','partial','paid','cancelled') NOT NULL DEFAULT 'unpaid',
   notes        VARCHAR(255) NULL,
   created_by   BIGINT UNSIGNED NULL,
@@ -172,6 +175,7 @@ CREATE TABLE supplier_payments (
   payment_no      VARCHAR(50)  NULL,          -- PAY-00001
   method          ENUM('cash','card','mobile_money','bank','cheque') NOT NULL DEFAULT 'cash',
   bank_account_id BIGINT UNSIGNED NULL,       -- required when method = bank/cheque
+  account_id      BIGINT UNSIGNED NULL,       -- selected Chart of Accounts ledger account
   amount          DECIMAL(14,2) NOT NULL,
   reference       VARCHAR(120) NULL,
   notes           VARCHAR(255) NULL,
@@ -207,6 +211,9 @@ CREATE TABLE customer_invoices (
   tax_total    DECIMAL(14,2) NOT NULL DEFAULT 0.00,
   total        DECIMAL(14,2) NOT NULL DEFAULT 0.00,
   paid_total   DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  returned_total DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  refunded_total DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  return_discount_total DECIMAL(14,2) NOT NULL DEFAULT 0.00,
   status       ENUM('unpaid','partial','paid','cancelled') NOT NULL DEFAULT 'unpaid',
   notes        VARCHAR(255) NULL,
   created_by   BIGINT UNSIGNED NULL,
@@ -254,6 +261,7 @@ CREATE TABLE customer_receipts (
   receipt_no      VARCHAR(50)  NULL,          -- RCV-00001
   method          ENUM('cash','card','mobile_money','bank','cheque') NOT NULL DEFAULT 'cash',
   bank_account_id BIGINT UNSIGNED NULL,
+  account_id      BIGINT UNSIGNED NULL,       -- selected Chart of Accounts ledger account
   amount          DECIMAL(14,2) NOT NULL,
   discount        DECIMAL(14,2) NOT NULL DEFAULT 0.00,  -- settlement discount waived off the due
   reference       VARCHAR(120) NULL,

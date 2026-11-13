@@ -2,9 +2,8 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
 
-class SupplierModel extends Model
+class SupplierModel extends FinanciallyProtectedModel
 {
     protected $table          = 'suppliers';
     protected $primaryKey     = 'id';
@@ -59,7 +58,7 @@ class SupplierModel extends Model
         $ids = array_map('intval', array_column($suppliers, 'id'));
 
         $billed = $this->db->table('supplier_bills')
-            ->select('supplier_id, SUM(total) AS billed')
+            ->select('supplier_id, SUM(total + refunded_total) AS billed')
             ->whereIn('supplier_id', $ids)
             ->where('status !=', 'cancelled')
             ->groupBy('supplier_id')

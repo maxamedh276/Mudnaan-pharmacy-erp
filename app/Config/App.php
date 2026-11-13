@@ -18,6 +18,19 @@ class App extends BaseConfig
      */
     public string $baseURL = 'http://localhost:8080/';
 
+    public function __construct()
+    {
+        parent::__construct();
+
+        if (isset($_SERVER['HTTP_HOST'])) {
+            $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
+            $scriptName = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '');
+            $scriptDir = trim(str_replace('\\', '/', dirname($scriptName)), '/');
+            $basePath = ($scriptDir !== '' && $scriptDir !== '.') ? '/' . $scriptDir . '/' : '/';
+            $this->baseURL = $scheme . $_SERVER['HTTP_HOST'] . $basePath;
+        }
+    }
+
     /**
      * Allowed Hostnames in the Site URL other than the hostname in the baseURL.
      * If you want to accept multiple Hostnames, set this.
@@ -40,7 +53,7 @@ class App extends BaseConfig
      * something else. If you have configured your web server to remove this file
      * from your site URIs, set this variable to an empty string.
      */
-    public string $indexPage = 'index.php';
+    public string $indexPage = '';
 
     /**
      * --------------------------------------------------------------------------
@@ -120,7 +133,7 @@ class App extends BaseConfig
      *
      * @var list<string>
      */
-    public array $supportedLocales = ['en'];
+    public array $supportedLocales = ['en', 'so'];
 
     /**
      * --------------------------------------------------------------------------
@@ -133,7 +146,7 @@ class App extends BaseConfig
      * @see https://www.php.net/manual/en/timezones.php for list of timezones
      *      supported by PHP.
      */
-    public string $appTimezone = 'UTC';
+    public string $appTimezone = 'Africa/Mogadishu';
 
     /**
      * --------------------------------------------------------------------------

@@ -1,0 +1,19 @@
+{
+  "workspacesVerified": 47,
+  "workflowsVerified": 14,
+  "printWorkspaces": 47,
+  "offlineNetworkRequests": 0,
+  "browserErrors": 0,
+  "mobileOverflow": false,
+  "pdfBytes": 532094,
+  "checks": [
+    "All module and workspace tabs",
+    "Search empty/matched recovery",
+    "Keyboard tabs",
+    "Workflow links",
+    "Unit calculation and insufficient-stock state",
+    "Screenshot dialog and Escape",
+    "390px responsive layout",
+    "Complete print view and PDF export"
+  ]
+}

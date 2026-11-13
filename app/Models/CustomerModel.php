@@ -2,9 +2,8 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
 
-class CustomerModel extends Model
+class CustomerModel extends FinanciallyProtectedModel
 {
     protected $table          = 'customers';
     protected $primaryKey     = 'id';
@@ -12,7 +11,7 @@ class CustomerModel extends Model
     protected $useSoftDeletes = true;
     protected $useTimestamps  = true;
     protected $deletedField   = 'deleted_at';
-    protected $allowedFields  = ['name', 'phone', 'email', 'address', 'balance'];
+    protected $allowedFields  = ['name', 'phone', 'email', 'address', 'balance', 'credit_limit'];
 
     public function search(?string $term, int $page, int $perPage): array
     {
@@ -37,6 +36,7 @@ class CustomerModel extends Model
     {
         $customer['id']      = (int) $customer['id'];
         $customer['balance'] = (float) $customer['balance'];
+        $customer['credit_limit'] = (float) ($customer['credit_limit'] ?? 0);
 
         return $customer;
     }

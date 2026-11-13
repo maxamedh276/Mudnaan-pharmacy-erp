@@ -55,40 +55,77 @@ class SalesService
         // create two sales. Return the existing one instead of failing.
         $existing = $this->sales->where('uuid', $uuid)->first();
 
+        if ($existing !== null && (int) $existing['branch_id'] !== $branchId) {
+            throw new InvalidArgumentException('INVALID_SALE_ITEM');
+        }
         if ($existing !== null) {
             return $this->sales->findDetailed((int) $existing['id'], $branchId);
         }
 
-        [$lineRows, $subtotal, $taxTotal, $costOfGoods] = $this->buildLines($itemsInput, $branchId);
-
-        $saleDiscount = round((float) ($data['discount'] ?? 0), 2);
-        $grandTotal   = round($subtotal + $taxTotal - $saleDiscount, 2);
-
-        $payments  = $this->normalizePayments($data['payments'] ?? [], $grandTotal);
-        $paidTotal = round(array_sum(array_column($payments, 'amount')), 2);
-
-        if ($paidTotal < $grandTotal && empty($data['customer_id'])) {
-            // Credit needs someone to owe the money.
-            throw new InvalidArgumentException('CREDIT_REQUIRES_CUSTOMER');
-        }
-
         $database = db_connect();
-
         try {
-            $database->transException(true)->transStart();
+            if (! $database->transException(true)->transBegin()) {
+                throw new \RuntimeException('TRANSACTION_FAILED');
+            }
+            $customer = null;
+            if (isset($data['customer_id'])) {
+                $customerId = filter_var($data['customer_id'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+                if (!$customerId) throw new InvalidArgumentException('CREDIT_REQUIRES_CUSTOMER');
+                // Same lock order as collections/returns: customer, then products.
+                $customer = (new CustomerCreditService())->lockCustomer($customerId);
+                // A retry may have waited for the original sale to commit.
+                $duplicate = $database->query('SELECT id FROM sales WHERE uuid=? AND branch_id=? FOR UPDATE', [$uuid, $branchId])->getRowArray();
+                if ($duplicate) {
+                    if (!$database->transStatus() || !$database->transCommit()) throw new RuntimeException('TRANSACTION_FAILED');
+                    return $this->sales->findDetailed((int)$duplicate['id'], $branchId);
+                }
+            }
+            // Lock products in ID order before reading their stock/cost.
+            $productIds = array_unique(array_map(static fn ($item) => (int) ($item['product_id'] ?? 0), $itemsInput));
+            sort($productIds);
+            foreach ($productIds as $productId) {
+                $database->query('SELECT id FROM products WHERE id = ? FOR UPDATE', [$productId]);
+            }
+            $activeTax = (new TaxRateService())->active();
+            if (array_key_exists('tax_id', $data)) {
+                $expectedTax = $data['tax_id'];
+                if ($expectedTax !== null && (!is_scalar($expectedTax) || !ctype_digit((string)$expectedTax))) throw new InvalidArgumentException('INVALID_SALE_ITEM');
+                if ((int)$expectedTax !== (int)($activeTax['id'] ?? 0)) throw new TaxChangedException($activeTax);
+            }
+            [$lineRows, $subtotal, $taxTotal, $costOfGoods] = $this->buildLines($itemsInput, $branchId, $activeTax);
+            (new \App\Services\Pharmacy\DispensingService())->validate($data, $lineRows, $branchId);
+
+            $saleDiscount = round((float) ($data['discount'] ?? 0), 2);
+            $saleShipping = round((float) ($data['shipping'] ?? 0), 2);
+            $grandTotal   = round($subtotal + $taxTotal - $saleDiscount + $saleShipping, 2);
+            if (!is_numeric($data['discount']??0) || !is_numeric($data['shipping']??0) || !is_finite($saleDiscount) || !is_finite($saleShipping) || $saleDiscount<0 || $saleShipping<0 || $grandTotal<=0 || $grandTotal>999999999999.99 || !is_finite($grandTotal)) throw new InvalidArgumentException('INVALID_SALE_ITEM');
+
+            if (!is_array($data['payments']??[])) throw new InvalidArgumentException('INVALID_PAYMENT_METHOD');
+            $payments  = $this->normalizePayments($data['payments'] ?? [], $grandTotal);
+            $paidTotal = round(array_sum(array_column($payments, 'amount')), 2);
+
+            if ($paidTotal < $grandTotal && empty($data['customer_id'])) {
+                // Credit needs someone to owe the money.
+                throw new InvalidArgumentException('CREDIT_REQUIRES_CUSTOMER');
+            }
+
+            if ($customer !== null) (new CustomerCreditService())->assertAvailable($customer, max(0, $grandTotal - $paidTotal));
 
             $saleId = $this->persistSale(
                 $database, $uuid, $data, $branchId, $userId, $plan,
-                $lineRows, $subtotal, $taxTotal, $costOfGoods, $saleDiscount,
+                $lineRows, $subtotal, $taxTotal, $costOfGoods, $saleDiscount, $saleShipping,
                 $grandTotal, $payments, $paidTotal,
             );
 
-            $database->transComplete();
-        } catch (\CodeIgniter\Database\Exceptions\DatabaseException $exception) {
+            if (! $database->transStatus() || ! $database->transCommit()) {
+                throw new RuntimeException('TRANSACTION_FAILED');
+            }
+        } catch (\Throwable $exception) {
+            $database->transRollback();
             // Concurrent double-submit of the same uuid: the losing
             // request returns the sale the winner just created.
             $winner = $this->sales->where('uuid', $uuid)->first();
-            if ($winner !== null) {
+            if ($exception instanceof \CodeIgniter\Database\Exceptions\DatabaseException && $winner !== null && (int) $winner['branch_id'] === $branchId) {
                 return $this->sales->findDetailed((int) $winner['id'], $branchId);
             }
             throw $exception;
@@ -113,6 +150,7 @@ class SalesService
         float $taxTotal,
         float $costOfGoods,
         float $saleDiscount,
+        float $saleShipping,
         float $grandTotal,
         array $payments,
         float $paidTotal,
@@ -124,6 +162,7 @@ class SalesService
             'customer_id' => $data['customer_id'] ?? null,
             'subtotal'    => $subtotal,
             'discount'    => $saleDiscount,
+            'shipping'    => $saleShipping,
             'tax_total'   => $taxTotal,
             'grand_total' => $grandTotal,
             'paid_total'  => min($paidTotal, $grandTotal),
@@ -144,21 +183,27 @@ class SalesService
             $database->table('payments')->insert([
                 'sale_id'         => $saleId,
                 'method'          => $payment['method'],
-                'bank_account_id' => $payment['bank_account_id'],
+                'account_id'      => $payment['account_id'] ?? null,
+                'bank_account_id' => $payment['bank_account_id'] ?? null,
                 'amount'          => $payment['amount'],
                 'reference'       => $payment['reference'],
             ]);
         }
 
         foreach ($lineRows as $lineRow) {
+            if ($lineRow['stock_mode'] === 'sealed') {
+                (new PackageInventoryService())->record($branchId, (int)$lineRow['product_id'], -(int)$lineRow['quantity'], (float)$lineRow['stock_factor'], 'sale', $saleId, $userId);
+            }
             $this->inventory->recordMovement(
                 $branchId,
                 (int) $lineRow['product_id'],
-                -$lineRow['quantity'],
+                -round($lineRow['quantity'] * $lineRow['stock_factor'], 3),
                 'sale',
                 'sale',
                 $saleId,
                 $userId,
+                null,
+                $lineRow['pharmacy_pack_state'] ?? 'any',
             );
         }
 
@@ -180,6 +225,8 @@ class SalesService
             $this->accounting->postSale($sale, $payments, $costOfGoods, $branchId, $userId);
         }
 
+        (new \App\Services\Pharmacy\DispensingService())->record($data, $saleId, $branchId, $userId);
+
         return $saleId;
     }
 
@@ -190,18 +237,19 @@ class SalesService
      * @return array{0: list<array>, 1: float, 2: float, 3: float}
      *         [line rows, subtotal, tax total, cost of goods]
      */
-    private function buildLines(array $itemsInput, int $branchId): array
+    private function buildLines(array $itemsInput, int $branchId, ?array $activeTax = null): array
     {
         $lineRows    = [];
         $subtotal    = 0.0;
         $taxTotal    = 0.0;
         $costOfGoods = 0.0;
+        $requested = [];
 
         foreach ($itemsInput as $item) {
             $productId = (int) ($item['product_id'] ?? 0);
             $quantity  = (float) ($item['quantity'] ?? 0);
 
-            if ($productId <= 0 || $quantity <= 0) {
+            if ($productId <= 0 || !is_numeric($item['quantity']??null) || !is_finite($quantity) || $quantity <= 0 || $quantity>999999999.999 || abs($quantity-round($quantity,3))>0.0000001) {
                 throw new InvalidArgumentException('INVALID_SALE_ITEM');
             }
 
@@ -211,29 +259,55 @@ class SalesService
                 throw new InvalidArgumentException('PRODUCT_NOT_FOUND');
             }
 
-            if ($product['quantity'] < $quantity) {
+            $packageService = new PackageInventoryService();
+            $packageLine = $packageService->line($product, $item);
+            // Sale-only snapshot: procurement keeps its existing packaging contract.
+            if (db_connect()->tableExists('pharmacy_medicine_units') && db_connect()->fieldExists('pharmacy_pack_state','pharmacy_medicine_units')) {
+                $unitQuery=db_connect()->table('pharmacy_medicine_units')->where('product_id',$productId);
+                if (isset($item['medicine_unit_id'])) $unitQuery->where('id',$item['medicine_unit_id']);
+                else $unitQuery->where('name',$product['unit'])->where('factor',1);
+                $pharmacyUnit=$unitQuery->get()->getRowArray();
+                if ($pharmacyUnit) $packageLine['pharmacy_pack_state']=$pharmacyUnit['pharmacy_pack_state'];
+            }
+            if (db_connect()->fieldExists('pharmacy_medicine_snapshot','sale_items')) {
+                $profile=db_connect()->table('pharmacy_medicines')->select('generic_name,strength,dosage_form,route_of_administration,active_ingredients')->where('product_id',$productId)->get()->getRowArray();
+                if ($profile) {$profile['active_ingredients']=json_decode($profile['active_ingredients']??'[]',true)??[];$packageLine['pharmacy_medicine_snapshot']=json_encode($profile,JSON_THROW_ON_ERROR);}
+            }
+            $mode = $packageLine['stock_mode'];
+            $poolKey = $productId . ':' . $mode;
+            $requested[$poolKey] = round(($requested[$poolKey] ?? 0) + $quantity, 3);
+            $packageService->requireStock($branchId, $product, $mode, $requested[$poolKey]);
+            $baseQuantity = round($quantity * $packageLine['stock_factor'], 3);
+            $requested[$productId] = round(($requested[$productId] ?? 0) + $baseQuantity, 3);
+            if ($product['quantity'] < $requested[$productId]) {
                 throw new RuntimeException('INSUFFICIENT_STOCK');
             }
 
-            $unitPrice    = round((float) ($item['unit_price'] ?? $product['sell_price']), 2);
+            $defaultPrice = $mode === 'sealed' ? $product['package_price'] : $product['sell_price'];
+            if (isset($item['medicine_unit_id'])) $defaultPrice = (new \App\Services\Pharmacy\MedicineUnitService())->resolve($productId, $item['medicine_unit_id'])['sell_price'];
+            $unitPrice    = round((float) ($item['unit_price'] ?? $defaultPrice), 2);
             $lineDiscount = round((float) ($item['discount'] ?? 0), 2);
+            if (!is_numeric($item['unit_price']??$defaultPrice) || !is_numeric($item['discount']??0) || !is_finite($unitPrice)||!is_finite($lineDiscount)||$unitPrice<0||$lineDiscount<0||$lineDiscount>$quantity*$unitPrice) throw new InvalidArgumentException('INVALID_SALE_ITEM');
+            if (!empty($item['pharmacy_discount_reason'])) $packageLine['pharmacy_discount_reason']=\App\Services\Pharmacy\PharmacyInput::text($item,'pharmacy_discount_reason',300,true);
             $lineNet      = round($quantity * $unitPrice - $lineDiscount, 2);
-            $lineTax      = round($lineNet * $product['tax_rate'] / 100, 2);
+            $taxRate      = $activeTax === null ? (float)$product['tax_rate'] : (float)$activeTax['percentage'];
+            $lineTax      = round($lineNet * $taxRate / 100, 2);
 
             $subtotal    += $lineNet;
             $taxTotal    += $lineTax;
-            $costOfGoods += round($quantity * $product['cost_price'], 2);
+            $costOfGoods += round($baseQuantity * $product['cost_price'], 2);
 
-            $lineRows[] = [
+            $lineRows[] = $packageLine + [
                 'product_id' => $productId,
                 'batch_id'   => $item['batch_id'] ?? null,
                 'serial_id'  => $item['serial_id'] ?? null,
-                'description'=> $product['name'],
+                'description'=> $product['name'] . ' (' . $packageLine['unit_label'] . ')',
                 'quantity'   => $quantity,
                 'unit_price' => $unitPrice,
                 'discount'   => $lineDiscount,
-                'tax_rate'   => $product['tax_rate'],
+                'tax_rate'   => $taxRate,
                 'line_total' => round($lineNet + $lineTax, 2),
+                'cost_total' => round($baseQuantity * (float)$product['cost_price'], 2),
             ];
         }
 
@@ -249,6 +323,7 @@ class SalesService
         $payments     = [];
 
         foreach ($paymentsInput as $payment) {
+            if (!is_array($payment)) throw new InvalidArgumentException('INVALID_PAYMENT_METHOD');
             $method = $payment['method'] ?? 'cash';
             $amount = round((float) ($payment['amount'] ?? 0), 2);
 
@@ -256,6 +331,7 @@ class SalesService
                 throw new InvalidArgumentException('INVALID_PAYMENT_METHOD');
             }
 
+            if (!is_numeric($payment['amount']??0)||!is_finite($amount)||$amount<0||$amount>999999999999.99) throw new InvalidArgumentException('INVALID_PAYMENT_METHOD');
             // 'credit' rows carry no money — the unpaid balance goes to
             // the customer's account instead.
             if ($method === 'credit' || $amount <= 0) {
@@ -265,6 +341,9 @@ class SalesService
             $payments[] = [
                 'method'          => $method,
                 'amount'          => $amount,
+                'account_id'      => isset($payment['account_id']) && (int) $payment['account_id'] > 0
+                    ? (int) $payment['account_id']
+                    : null,
                 'bank_account_id' => isset($payment['bank_account_id']) && (int) $payment['bank_account_id'] > 0
                     ? (int) $payment['bank_account_id']
                     : null,

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\UserModel;
+use App\Libraries\AdministrativeAccess;
 use InvalidArgumentException;
 
 /**
@@ -19,7 +20,7 @@ class UserService
     ) {
     }
 
-    public function list(?string $query): array
+    public function list(?string $query = null): array
     {
         $builder = $this->users
             ->select('users.id, users.name, users.email, users.phone,
@@ -76,81 +77,101 @@ class UserService
         }
 
         $this->assertRoleExists($roleId);
+        AdministrativeAccess::assertRoleAssignable($roleId);
         $this->assertUniqueEmail($email);
         $this->assertUniquePhone($phone);
 
-        $userId = (int) $this->users->insert([
-            'name'          => $name,
-            'email'         => $email,
-            'phone'         => $phone,
-            'password_hash' => password_hash($password, PASSWORD_DEFAULT),
-            'role_id'       => $roleId,
-            'branch_id'     => $data['branch_id'] ?? 1,
-            'is_active'     => 1,
-        ]);
+        return FinancialTransaction::run(function () use ($name, $email, $phone, $password, $roleId, $data) {
+            $userId = (int) $this->users->insert([
+                'name'          => $name,
+                'email'         => $email,
+                'phone'         => $phone,
+                'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+                'role_id'       => $roleId,
+                'branch_id'     => $data['branch_id'] ?? 1,
+                'is_active'     => 1,
+            ]);
 
-        AuditService::log('user.create', 'users', 'users', $userId, after: [
-            'name' => $name, 'email' => $email, 'role_id' => $roleId,
-        ]);
+            AuditService::log('user.create', 'users', 'users', $userId, after: [
+                'name' => $name, 'email' => $email, 'role_id' => $roleId,
+            ]);
 
-        return $this->find($userId);
+            return $this->find($userId);
+        });
     }
 
     public function update(int $userId, array $data): array
     {
-        $existing = $this->users->where('deleted_at', null)->find($userId);
+        return FinancialTransaction::run(function () use ($userId, $data) {
+            AdministrativeAccess::lockSuperadminRoles();
+            AdministrativeAccess::assertUserManageable($userId);
+            $existing = $this->users->where('deleted_at', null)->find($userId);
 
-        if ($existing === null) {
-            throw new InvalidArgumentException('USER_NOT_FOUND');
-        }
-
-        $fields = [];
-
-        if (array_key_exists('name', $data)) {
-            $name = trim((string) $data['name']);
-            if ($name === '') {
-                throw new InvalidArgumentException('NAME_REQUIRED');
+            if ($existing === null) {
+                throw new InvalidArgumentException('USER_NOT_FOUND');
             }
-            $fields['name'] = $name;
-        }
 
-        if (array_key_exists('email', $data)) {
-            $email = $this->clean($data['email']);
-            $this->assertUniqueEmail($email, $userId);
-            $fields['email'] = $email;
-        }
+            $fields = [];
 
-        if (array_key_exists('phone', $data)) {
-            $phone = $this->clean($data['phone']);
-            $this->assertUniquePhone($phone, $userId);
-            $fields['phone'] = $phone;
-        }
-
-        if (array_key_exists('role_id', $data)) {
-            $roleId = (int) $data['role_id'];
-            $this->assertRoleExists($roleId);
-            $fields['role_id'] = $roleId;
-        }
-
-        if (array_key_exists('branch_id', $data)) {
-            $fields['branch_id'] = $data['branch_id'];
-        }
-
-        if (! empty($data['password'])) {
-            if (strlen((string) $data['password']) < self::MIN_PASSWORD) {
-                throw new InvalidArgumentException('WEAK_PASSWORD');
+            if (array_key_exists('name', $data)) {
+                $name = trim((string) $data['name']);
+                if ($name === '') {
+                    throw new InvalidArgumentException('NAME_REQUIRED');
+                }
+                $fields['name'] = $name;
             }
-            $fields['password_hash'] = password_hash((string) $data['password'], PASSWORD_DEFAULT);
-        }
 
-        if ($fields !== []) {
-            $this->users->update($userId, $fields);
-            AuditService::log('user.update', 'users', 'users', $userId,
-                before: ['role_id' => $existing->role_id],
-                after: array_diff_key($fields, ['password_hash' => '']));
-        }
+            if (array_key_exists('email', $data)) {
+                $email = $this->clean($data['email']);
+                $this->assertUniqueEmail($email, $userId);
+                $fields['email'] = $email;
+            }
 
-        return $this->find($userId);
+            if (array_key_exists('phone', $data)) {
+                $phone = $this->clean($data['phone']);
+                $this->assertUniquePhone($phone, $userId);
+                $fields['phone'] = $phone;
+            }
+
+            if (array_key_exists('role_id', $data)) {
+                $roleId = (int) $data['role_id'];
+                $this->assertRoleExists($roleId);
+                AdministrativeAccess::assertRoleAssignable($roleId);
+                $oldRole = db_connect()->table('roles')->where('id', $existing->role_id)->get()->getRowArray();
+                $newRole = db_connect()->table('roles')->where('id', $roleId)->get()->getRowArray();
+                if ((bool)$existing->is_active && AdministrativeAccess::isSuperadminRole($oldRole['name'] ?? '')
+                    && !AdministrativeAccess::isSuperadminRole($newRole['name'] ?? '')) {
+                    AdministrativeAccess::assertOtherSuperadmin($userId);
+                }
+                $fields['role_id'] = $roleId;
+            }
+
+            if (array_key_exists('branch_id', $data)) {
+                $fields['branch_id'] = $data['branch_id'];
+            }
+
+            if (! empty($data['password'])) {
+                if (strlen((string) $data['password']) < self::MIN_PASSWORD) {
+                    throw new InvalidArgumentException('WEAK_PASSWORD');
+                }
+                $fields['password_hash'] = password_hash((string) $data['password'], PASSWORD_DEFAULT);
+            }
+
+            $email = array_key_exists('email', $fields) ? $fields['email'] : $existing->email;
+            $phone = array_key_exists('phone', $fields) ? $fields['phone'] : $existing->phone;
+            if (empty($email) && empty($phone)) {
+                throw new InvalidArgumentException('IDENTITY_REQUIRED');
+            }
+
+            if ($fields !== []) {
+                $this->users->update($userId, $fields);
+                AuditService::log('user.update', 'users', 'users', $userId,
+                    before: ['role_id' => $existing->role_id],
+                    after: array_diff_key($fields, ['password_hash' => '']));
+            }
+
+            return $this->find($userId);
+        });
     }
 
     public function setActive(int $userId, bool $active, int $actingUserId): array
@@ -159,18 +180,27 @@ class UserService
             throw new InvalidArgumentException('CANNOT_DEACTIVATE_SELF');
         }
 
-        $existing = $this->users->where('deleted_at', null)->find($userId);
+        return FinancialTransaction::run(function () use ($userId, $active) {
+            AdministrativeAccess::lockSuperadminRoles();
+            AdministrativeAccess::assertUserManageable($userId);
+            $existing = $this->users->where('deleted_at', null)->find($userId);
 
-        if ($existing === null) {
-            throw new InvalidArgumentException('USER_NOT_FOUND');
-        }
+            if ($existing === null) {
+                throw new InvalidArgumentException('USER_NOT_FOUND');
+            }
 
-        $this->users->update($userId, ['is_active' => $active ? 1 : 0]);
+            $role = db_connect()->table('roles')->where('id', $existing->role_id)->get()->getRowArray();
+            if (!$active && (bool)$existing->is_active && AdministrativeAccess::isSuperadminRole($role['name'] ?? '')) {
+                AdministrativeAccess::assertOtherSuperadmin($userId);
+            }
 
-        AuditService::log('user.' . ($active ? 'activate' : 'deactivate'),
-            'users', 'users', $userId);
+            $this->users->update($userId, ['is_active' => $active ? 1 : 0]);
 
-        return $this->find($userId);
+            AuditService::log('user.' . ($active ? 'activate' : 'deactivate'),
+                'users', 'users', $userId);
+
+            return $this->find($userId);
+        });
     }
 
     private function assertRoleExists(int $roleId): void

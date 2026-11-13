@@ -9,7 +9,7 @@
 INSERT INTO users (branch_id, role_id, name, email, phone, password_hash)
   SELECT 1, r.id, 'Yasir Ahmed', 'yasir@demo.com', '+252612345678',
          '$2y$10$d8wriQMYCs/5NPe0CYbeGu69Hq9qGgPEfpeMGBRMbk5Ob.nMA6FfC'
-  FROM roles r WHERE r.name = 'Owner';
+  FROM roles r WHERE r.name IN ('Superadmin','Owner') ORDER BY (r.name='Superadmin') DESC LIMIT 1;
 
 -- Demo cashier login: cashier@demo.com / Secret123!
 INSERT INTO users (branch_id, role_id, name, email, phone, password_hash)

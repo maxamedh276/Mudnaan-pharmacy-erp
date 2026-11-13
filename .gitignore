@@ -84,7 +84,7 @@ php_errors.log
 #-------------------------
 # Composer
 #-------------------------
-vendor/
+/vendor/
 
 #-------------------------
 # IDE / Development Files
@@ -124,3 +124,14 @@ _modules/*
 
 /results/
 /phpunit.xml
+
+# QZ credentials belong in protected storage, never source control.
+**/private-key*.pem
+**/private-key*.pfx
+**/QZ Tray Demo Cert/
+
+/.tools/
+/.branches/
+
+# Private patient documents are runtime data, never repository assets.
+/writable/pharmacy-documents/

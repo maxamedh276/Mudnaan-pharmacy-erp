@@ -1,0 +1,14 @@
+/* Dashboard-only finishing: layout, spacing and cards use the shared Tailwind theme. */
+#roleDashboard { container-type: inline-size; }
+#roleDashboard .tabular-nums { font-variant-numeric: tabular-nums; }
+.dashboard-enter { animation: dashboard-enter .32s ease-out both; animation-delay: var(--dashboard-delay, 0ms); }
+.dashboard-bar { animation: dashboard-chart-in .55s ease-out both; transition: opacity .15s ease; }
+.dashboard-bar:hover { opacity: .75; }
+.dashboard-ring { animation: dashboard-chart-in .65s ease-out both; }
+@keyframes dashboard-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes dashboard-chart-in { from { opacity: .15; } to { opacity: 1; } }
+#roleDashboard [data-dashboard-filter][aria-pressed=true] { background: var(--system-brand, #1967d2); color: white; border-color: var(--system-brand, #1967d2); }
+#dashboardOrderDialog { max-height: calc(100dvh - 2rem); overflow: auto; }
+@container (max-width: 1050px) { #roleDashboard .dashboard-kpi-grid { grid-template-columns: repeat(3,minmax(0,1fr)); } #roleDashboard .dashboard-chart-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } #roleDashboard .dashboard-chart-grid > :first-child { grid-column: span 2; } }
+@container (max-width: 580px) { #roleDashboard .dashboard-kpi-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } #roleDashboard .dashboard-chart-grid { grid-template-columns: minmax(0,1fr); } #roleDashboard .dashboard-chart-grid > :first-child { grid-column: auto; } #roleDashboard .dashboard-kpi-value { font-size: 1.2rem; } }
+@media (prefers-reduced-motion: reduce) { .dashboard-enter,.dashboard-bar,.dashboard-ring { animation: none; transition: none; } }

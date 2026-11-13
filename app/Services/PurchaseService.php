@@ -42,7 +42,7 @@ class PurchaseService
             $productId = (int) ($item['product_id'] ?? 0);
             $quantity  = (float) ($item['quantity'] ?? 0);
 
-            if ($productId <= 0 || $quantity <= 0) {
+            if ($productId <= 0 || !is_numeric($item['quantity']??null) || !is_finite($quantity) || $quantity <= 0 || abs($quantity-round($quantity,3))>0.0000001) {
                 throw new InvalidArgumentException('INVALID_PURCHASE_ITEM');
             }
 
@@ -52,11 +52,14 @@ class PurchaseService
                 throw new InvalidArgumentException('PRODUCT_NOT_FOUND');
             }
 
-            $unitCost  = round((float) ($item['unit_cost'] ?? $product['cost_price']), 2);
+            $unitFields = isset($item['medicine_unit_id']) ? (new PackageInventoryService())->line($product, $item) : [];
+            $defaultCost = (float)$product['cost_price'] * ($unitFields['stock_factor'] ?? 1);
+            $unitCost  = round((float) ($item['unit_cost'] ?? $defaultCost), 2);
+            if (!is_numeric($item['unit_cost']??$defaultCost) || !is_finite($unitCost)||$unitCost<0) throw new InvalidArgumentException('INVALID_PURCHASE_ITEM');
             $lineTotal = round($quantity * $unitCost, 2);
             $total    += $lineTotal;
 
-            $itemRows[] = [
+            $itemRows[] = $unitFields + [
                 'product_id'        => $productId,
                 'batch_id'          => $item['batch_id'] ?? null,
                 'quantity'          => $quantity,
@@ -69,25 +72,33 @@ class PurchaseService
         $total = round($total, 2);
 
         $database = db_connect();
-        $database->transException(true)->transStart();
-
-        $purchaseId = (int) $this->purchases->insert([
-            'branch_id'    => $branchId,
-            'supplier_id'  => $data['supplier_id'] ?? null,
-            'user_id'      => $userId,
-            'reference_no' => $data['reference_no'] ?? null,
-            'total'        => $total,
-            'status'       => 'pending',
-            'purchased_at' => $data['purchased_at'] ?? date('Y-m-d H:i:s'),
-        ]);
-
-        foreach ($itemRows as $index => $itemRow) {
-            $itemRows[$index]['purchase_id'] = $purchaseId;
+        if (! $database->transException(true)->transBegin()) {
+            throw new \RuntimeException('TRANSACTION_FAILED');
         }
+        try {
+            if (isset($data['supplier_id']) && !$database->query('SELECT id FROM suppliers WHERE id=? AND deleted_at IS NULL FOR UPDATE',[(int)$data['supplier_id']])->getRowArray()) throw new InvalidArgumentException('INVALID_PURCHASE_ITEM');
+            $purchaseId = (int) $this->purchases->insert([
+                'branch_id'    => $branchId,
+                'supplier_id'  => $data['supplier_id'] ?? null,
+                'user_id'      => $userId,
+                'reference_no' => $data['reference_no'] ?? null,
+                'total'        => $total,
+                'status'       => 'pending',
+                'purchased_at' => $data['purchased_at'] ?? date('Y-m-d H:i:s'),
+            ]);
 
-        $database->table('purchase_items')->insertBatch($itemRows);
+            foreach ($itemRows as $index => $itemRow) {
+                $itemRows[$index]['purchase_id'] = $purchaseId;
+            }
 
-        $database->transComplete();
+            $database->table('purchase_items')->insertBatch($itemRows);
+            if (! $database->transStatus() || ! $database->transCommit()) {
+                throw new \RuntimeException('TRANSACTION_FAILED');
+            }
+        } catch (\Throwable $exception) {
+            $database->transRollback();
+            throw $exception;
+        }
 
         return $this->purchases->findDetailed($purchaseId, $branchId);
     }

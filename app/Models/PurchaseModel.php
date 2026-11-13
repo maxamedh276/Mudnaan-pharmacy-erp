@@ -88,7 +88,7 @@ class PurchaseModel extends Model
 
             return $item;
         }, $this->db->table('purchase_items')
-            ->select('purchase_items.id, purchase_items.product_id,
+            ->select('purchase_items.id, purchase_items.product_id, purchase_items.stock_factor, purchase_items.stock_mode, purchase_items.unit_label,
                       products.name AS product_name, purchase_items.quantity,
                       purchase_items.quantity_received,
                       purchase_items.unit_cost, purchase_items.line_total')

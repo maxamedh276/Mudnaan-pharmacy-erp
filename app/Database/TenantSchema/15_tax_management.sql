@@ -1,0 +1,13 @@
+CREATE TABLE IF NOT EXISTS tax_rates (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    percentage DECIMAL(5,2) NOT NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 0,
+    active_slot TINYINT GENERATED ALWAYS AS (CASE WHEN is_active=1 THEN 1 ELSE NULL END) STORED,
+    request_uuid CHAR(36) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY tax_name_unique (name),
+    UNIQUE KEY tax_request_unique (request_uuid),
+    UNIQUE KEY tax_one_active (active_slot)
+) ENGINE=InnoDB;

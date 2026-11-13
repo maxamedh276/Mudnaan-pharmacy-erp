@@ -203,7 +203,7 @@ class AccountingService
             lines: [
                 ['code' => self::PAYABLE, 'debit' => (float) $payment['amount']],
                 [
-                    'account_id' => $this->cashOrBankAccountId($payment['bank_account_id'] ?? null, $payment['method']),
+                    'account_id' => $payment['account_id'] ?? $this->cashOrBankAccountId($payment['bank_account_id'] ?? null, $payment['method']),
                     'credit'     => (float) $payment['amount'],
                 ],
             ],
@@ -256,7 +256,7 @@ class AccountingService
             sourceId: (int) $receipt['id'],
             lines: [
                 [
-                    'account_id' => $this->cashOrBankAccountId($receipt['bank_account_id'] ?? null, $receipt['method']),
+                    'account_id' => $receipt['account_id'] ?? $this->cashOrBankAccountId($receipt['bank_account_id'] ?? null, $receipt['method']),
                     'debit'      => $amount,
                 ],
                 ['code' => self::SALES_DISCOUNT, 'debit'  => $discount],
@@ -352,7 +352,11 @@ class AccountingService
             }
 
             $lines[]   = [
-                'account_id' => $this->cashOrBankAccountId($payment['bank_account_id'] ?? null, $payment['method']),
+                'account_id' => $this->cashOrBankAccountId(
+                    $payment['bank_account_id'] ?? null,
+                    $payment['method'] ?? 'cash',
+                    $payment['account_id'] ?? null
+                ),
                 'debit'      => $portion,
             ];
             $remaining = round($remaining - $portion, 2);
@@ -371,8 +375,12 @@ class AccountingService
      * otherwise cash goes to Cash on Hand and every electronic method
      * defaults to the built-in Bank Account.
      */
-    public function cashOrBankAccountId(?int $bankAccountId, string $method): int
+    public function cashOrBankAccountId(?int $bankAccountId, string $method, ?int $accountId = null): int
     {
+        if ($accountId !== null && $accountId > 0) {
+            return $accountId;
+        }
+
         if ($bankAccountId !== null && $bankAccountId > 0) {
             $row = db_connect()->table('bank_accounts')
                 ->select('account_id')
@@ -424,6 +432,12 @@ class AccountingService
         $lineRows    = [];
 
         foreach ($lines as $line) {
+            // Ledger columns are DECIMAL(14,2); never let MySQL silently clamp an
+            // oversized inventory valuation or accept non-finite/negative money.
+            foreach (['debit','credit'] as $side) {
+                $raw=$line[$side]??0;
+                if (!is_numeric($raw)||!is_finite((float)$raw)||(float)$raw<0||(float)$raw>999999999999.99) throw new InvalidArgumentException('Journal amounts must be finite, non-negative and fit the ledger precision.');
+            }
             $debit  = round((float) ($line['debit'] ?? 0), 2);
             $credit = round((float) ($line['credit'] ?? 0), 2);
 
@@ -449,6 +463,7 @@ class AccountingService
             ];
         }
 
+        if (!is_finite($totalDebit)||!is_finite($totalCredit)||$totalDebit>999999999999.99||$totalCredit>999999999999.99) throw new InvalidArgumentException('Journal totals exceed the ledger precision.');
         if ($lineRows === [] || round($totalDebit, 2) !== round($totalCredit, 2)) {
             throw new InvalidArgumentException(sprintf(
                 'Journal entry does not balance: debits %.2f vs credits %.2f',
@@ -457,6 +472,7 @@ class AccountingService
             ));
         }
 
+        \App\Services\Pharmacy\CashShiftService::guardPosting($branchId,$userId,array_column($lineRows,'account_id'));
         $database->table('journal_entries')->insert([
             'uuid'         => Uuid::v4(),
             'branch_id'    => $branchId,

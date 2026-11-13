@@ -2,14 +2,15 @@
 
 namespace App\Services;
 
+use App\Libraries\AdministrativeAccess;
 use InvalidArgumentException;
 
 /**
  * Role and permission management. A role is a named bundle of
  * permission codes; changing a role's permissions takes effect on the
  * next request for every user who has it (permissions are re-read per
- * request in AuthFilter). System roles can be re-permissioned but not
- * deleted, and a role in use can't be deleted either.
+ * request in AuthFilter). Superadmin and Admin have fixed access;
+ * other system roles can be re-permissioned but cannot be deleted.
  */
 class RoleService
 {
@@ -65,21 +66,18 @@ class RoleService
             throw new InvalidArgumentException('NAME_REQUIRED');
         }
 
+        AdministrativeAccess::assertRoleEditable(['name' => $name]);
+        $this->validatePermissions($data['permissions'] ?? []);
+
         $this->assertUniqueName($name);
 
-        $database = db_connect();
-        $database->transException(true)->transStart();
-
-        $database->table('roles')->insert(['name' => $name, 'is_system' => 0]);
-        $roleId = (int) $database->insertID();
-
-        $this->syncPermissions($roleId, $data['permissions'] ?? []);
-
-        $database->transComplete();
-
-        AuditService::log('role.create', 'roles', 'roles', $roleId, after: ['name' => $name]);
-
-        return $this->find($roleId);
+        return FinancialTransaction::run(function ($database) use ($name, $data) {
+            $database->table('roles')->insert(['name' => $name, 'is_system' => 0]);
+            $roleId = (int) $database->insertID();
+            $this->syncPermissions($roleId, $data['permissions'] ?? []);
+            AuditService::log('role.create', 'roles', 'roles', $roleId, after: ['name' => $name]);
+            return $this->find($roleId);
+        });
     }
 
     /**
@@ -94,26 +92,31 @@ class RoleService
             throw new InvalidArgumentException('ROLE_NOT_FOUND');
         }
 
-        $database->transException(true)->transStart();
-
+        AdministrativeAccess::assertRoleEditable($role);
         if (array_key_exists('name', $data)) {
-            $name = trim((string) $data['name']);
-            if ($name === '') {
-                throw new InvalidArgumentException('NAME_REQUIRED');
+            AdministrativeAccess::assertRoleEditable(['name' => trim((string)$data['name'])]);
+        }
+        if (array_key_exists('permissions', $data)) $this->validatePermissions($data['permissions']);
+
+        return FinancialTransaction::run(function ($database) use ($roleId, $data) {
+
+            if (array_key_exists('name', $data)) {
+                $name = trim((string) $data['name']);
+                if ($name === '') {
+                    throw new InvalidArgumentException('NAME_REQUIRED');
+                }
+                $this->assertUniqueName($name, $roleId);
+                $database->table('roles')->where('id', $roleId)->update(['name' => $name]);
             }
-            $this->assertUniqueName($name, $roleId);
-            $database->table('roles')->where('id', $roleId)->update(['name' => $name]);
-        }
 
-        if (array_key_exists('permissions', $data)) {
-            $this->syncPermissions($roleId, $data['permissions'] ?? []);
-        }
+            if (array_key_exists('permissions', $data)) {
+                $this->syncPermissions($roleId, $data['permissions'] ?? []);
+            }
 
-        $database->transComplete();
+            AuditService::log('role.update', 'roles', 'roles', $roleId);
 
-        AuditService::log('role.update', 'roles', 'roles', $roleId);
-
-        return $this->find($roleId);
+            return $this->find($roleId);
+        });
     }
 
     public function delete(int $roleId): void
@@ -124,6 +127,7 @@ class RoleService
         if ($role === null) {
             throw new InvalidArgumentException('ROLE_NOT_FOUND');
         }
+        AdministrativeAccess::assertRoleEditable($role);
         if ((int) $role['is_system'] === 1) {
             throw new InvalidArgumentException('SYSTEM_ROLE');
         }
@@ -144,17 +148,24 @@ class RoleService
 
     private function permissionCodes(int $roleId): array
     {
-        return array_column(db_connect()->table('role_permissions')
-            ->select('permissions.code')
-            ->join('permissions', 'permissions.id = role_permissions.permission_id')
-            ->where('role_permissions.role_id', $roleId)
-            ->get()->getResultArray(), 'code');
+        return (new \App\Models\UserModel())->permissionCodes($roleId);
+    }
+
+    private function validatePermissions(mixed $codes): void
+    {
+        if (!is_array($codes) || array_filter($codes, static fn($code) => !is_string($code))) {
+            throw new InvalidArgumentException('INVALID_PERMISSIONS');
+        }
+        if (in_array('settings.operational', $codes, true)) {
+            throw new \CodeIgniter\HTTP\Exceptions\HTTPException('Operational Settings cannot be delegated to another role.', 403);
+        }
+        $known = array_column($this->allPermissions(), 'code');
+        if (array_diff($codes, $known)) throw new InvalidArgumentException('INVALID_PERMISSIONS');
     }
 
     /**
      * Replaces a role's permissions with exactly the given codes.
-     * Unknown codes are ignored so a typo can't grant nothing silently
-     * without warning — only real permissions are attached.
+     * Codes have already been validated against the permission catalog.
      */
     private function syncPermissions(int $roleId, array $codes): void
     {

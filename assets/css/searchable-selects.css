@@ -1,0 +1,25 @@
+.select2-container { min-width: 0; font-size: .8125rem; text-align: left; }
+.select2-container--default .select2-selection--single { height: 36px; border: 1px solid #cbd5e1; border-radius: .5rem; background: white; }
+.select2-container--default .select2-selection--single .select2-selection__rendered { line-height: 34px; padding-left: .75rem; padding-right: 1.75rem; color: #0f172a; }
+.select2-container--default .select2-selection--single .select2-selection__arrow { height: 34px; right: .35rem; }
+.select2-container--default.select2-container--focus .select2-selection--single,
+.select2-container--default.select2-container--open .select2-selection--single { border-color: #1967d2; outline: 2px solid #dbeafe; }
+.select2-dropdown { border-color: #cbd5e1; border-radius: .5rem; overflow: hidden; }
+.select2-search--dropdown .select2-search__field { border: 1px solid #cbd5e1; border-radius: .375rem; padding: .5rem; outline: none; }
+.select2-results__option { padding: .5rem .75rem; overflow-wrap: anywhere; }
+.select2-container--open { z-index: 9999; }
+.select2-container--default.select2-container--disabled .select2-selection--single { background: #f1f5f9; opacity: .7; cursor: not-allowed; }
+.select2-container--default .select2-selection--multiple { min-height: 36px; border: 1px solid #cbd5e1; border-radius: .5rem; }
+.dataTables_length .select2-container { width: 5.5rem !important; display: inline-block; margin: 0 .35rem; }
+
+/* A native modal is a stable containing block for its Select2 dropdowns. */
+.erp-shell dialog { position: fixed; }
+.erp-shell #productDialog {
+    height: min(92vh, calc(100vh - 2rem));
+    height: min(92dvh, calc(100dvh - 2rem));
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    -webkit-overflow-scrolling: touch;
+}

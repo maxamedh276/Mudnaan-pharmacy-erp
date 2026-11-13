@@ -78,26 +78,33 @@ class BudgetService
             $lineRows[]       = ['account_id' => $accountId, 'amount' => $amount];
         }
 
-        $database->transException(true)->transStart();
-
-        $database->table('budgets')->insert([
-            'branch_id'  => $branchId,
-            'name'       => $name,
-            'start_date' => $startDate,
-            'end_date'   => $endDate,
-            'notes'      => $data['notes'] ?? null,
-            'created_by' => $userId,
-        ]);
-
-        $budgetId = (int) $database->insertID();
-
-        foreach ($lineRows as $index => $lineRow) {
-            $lineRows[$index]['budget_id'] = $budgetId;
+        if (! $database->transException(true)->transBegin()) {
+            throw new \RuntimeException('TRANSACTION_FAILED');
         }
+        try {
+            $database->table('budgets')->insert([
+                'branch_id'  => $branchId,
+                'name'       => $name,
+                'start_date' => $startDate,
+                'end_date'   => $endDate,
+                'notes'      => $data['notes'] ?? null,
+                'created_by' => $userId,
+            ]);
 
-        $database->table('budget_lines')->insertBatch($lineRows);
+            $budgetId = (int) $database->insertID();
 
-        $database->transComplete();
+            foreach ($lineRows as $index => $lineRow) {
+                $lineRows[$index]['budget_id'] = $budgetId;
+            }
+
+            $database->table('budget_lines')->insertBatch($lineRows);
+            if (! $database->transStatus() || ! $database->transCommit()) {
+                throw new \RuntimeException('TRANSACTION_FAILED');
+            }
+        } catch (\Throwable $exception) {
+            $database->transRollback();
+            throw $exception;
+        }
 
         AuditService::log('budget.create', 'accounting', 'budgets', $budgetId, details: ['lines' => count($lineRows)]);
 

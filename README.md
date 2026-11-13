@@ -1,4 +1,48 @@
-# CodeIgniter 4 Application Starter
+# Mudnaan-pharmacy-erp
+
+Retail pharmacy management built from the existing Mudnaan ERP interface, inventory, purchasing, returns and accounting services. The active application is in this project root on `main`.
+
+The pharmacy supports medicine categories, generic/brand names, strengths, dosage forms (tablet, capsule, syrup, injection, cream and others), and multiple selling units such as tablet, strip and box. Unit conversions and prices are saved per medicine; old documents retain their original conversion factors.
+
+Batch inventory supports receiving with batch/expiry dates, FEFO sales allocation, expired-stock blocking, quarantine, recalls, disposal and legacy stock reconciliation. Customer medicine returns enter quarantine; supplier returns remove stock from the original purchase batches.
+
+Patients, prescriptions, pharmacist approval, partial/final dispensing and remaining prescription quantities are integrated with the existing sales transaction. The POS supports medicine units, barcode/SKU entry, payment accounts, tax, customer credit and printable dispensing labels. Financial reports, suppliers, invoices, payments, staff, permissions and audit records reuse the ERP implementation.
+
+English and Somali are available for pharmacy screens. Existing finance/admin screens retain their English interface.
+
+## Run locally
+
+Requirements: PHP 8.2+, Composer and MySQL/MariaDB. XAMPP's installed PHP is 8.0, so this workspace uses the separate, ignored runtime `.tools/php84/php.exe`.
+
+```powershell
+# Fresh installation only; refuses to overwrite an existing pharmacy_main database.
+php tools/install_pharmacy.php
+.tools/php84/php.exe -S 127.0.0.1:8085 tools/dev_router.php
+```
+
+The current local application is available at `http://127.0.0.1:8085`. Initial credentials are stored privately in the ignored `.tools/LOCAL_ACCESS.json`. Change the administrator password after signing in.
+
+`pharmacy_main` is a fresh installation. The previous configured `erp_tenant_demo` database was absent; no existing business database was reset or populated with test transactions. Review existing schema/migration history before upgrading a populated ERP database. Do not use the fresh installer as an upgrade tool.
+
+Set `PHARMACY_DATABASE` for a different pharmacy database and use standard CodeIgniter environment settings for its connection. Currency and business identity remain configurable through Settings; timezone defaults to `Africa/Mogadishu` and can be overridden with `app.appTimezone` in `.env`.
+
+## Verification
+
+```powershell
+php tests/pharmacy_input_smoke.php
+php tests/pharmacy_service_smoke.php
+php tests/pharmacy_operations_smoke.php
+php tests/pharmacy_concurrency_smoke.php
+node tests/pharmacy_browser_smoke.cjs
+```
+
+Database and browser workflows use new `pharmacy_test_*` fixture databases and remove only their own fixtures. The browser suite uses Edge and the development dependency in `.tools/browser`; it does not create financial records in the local pharmacy database.
+
+See [implementation notes](docs/PHARMACY_IMPLEMENTATION.md) for migration and operating details. Clinical dose calculation, interaction checking, insurance claims, universal regulatory compliance and real printer hardware are not certified by these tests.
+
+---
+
+# Framework reference
 
 ## What is CodeIgniter?
 

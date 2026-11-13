@@ -225,6 +225,7 @@ CREATE TABLE products (
   supplier_id   BIGINT UNSIGNED NULL,
   sku           VARCHAR(80)  NULL,             -- our internal product code
   barcode       VARCHAR(80)  NULL,             -- scanner barcode
+  sealed_barcode VARCHAR(80) NULL,             -- barcode printed on a sealed package
   name          VARCHAR(180) NOT NULL,
   brand         VARCHAR(120) NULL,
   unit          VARCHAR(30)  NULL DEFAULT 'pcs', -- pcs, box, kg, litre...
@@ -244,6 +245,7 @@ CREATE TABLE products (
   KEY idx_prod_category (category_id),
   KEY idx_prod_supplier (supplier_id),
   KEY idx_prod_barcode (barcode),              -- fast barcode scanning
+  KEY idx_prod_sealed_barcode (sealed_barcode),
   KEY idx_prod_sku (sku),
   CONSTRAINT fk_prod_category FOREIGN KEY (category_id) REFERENCES categories (id),
   CONSTRAINT fk_prod_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers (id)
@@ -365,6 +367,7 @@ CREATE TABLE customers (
   email       VARCHAR(150) NULL,
   address     VARCHAR(255) NULL,
   balance     DECIMAL(12,2) NOT NULL DEFAULT 0.00, -- + credit / - they owe us
+  credit_limit DECIMAL(12,2) UNSIGNED NOT NULL DEFAULT 0.00,
   created_at  TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at  TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   deleted_at  TIMESTAMP    NULL DEFAULT NULL,
@@ -398,6 +401,9 @@ CREATE TABLE sales (
   tax_total     DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   grand_total   DECIMAL(12,2) NOT NULL DEFAULT 0.00, -- final amount due
   paid_total    DECIMAL(12,2) NOT NULL DEFAULT 0.00, -- amount actually paid
+  returned_total DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  refunded_total DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+  return_discount_total DECIMAL(14,2) NOT NULL DEFAULT 0.00,
   status        ENUM('completed','held','refunded','partial')
                             NOT NULL DEFAULT 'completed',
   sync_status   ENUM('synced','pending') NOT NULL DEFAULT 'synced', -- for offline later
@@ -433,6 +439,7 @@ CREATE TABLE sale_items (
   discount      DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   tax_rate      DECIMAL(5,2)  NOT NULL DEFAULT 0.00,
   line_total    DECIMAL(12,2) NOT NULL DEFAULT 0.00, -- qty * price - discount + tax
+  cost_total    DECIMAL(14,2) NULL,             -- original line COGS; NULL only for legacy sales
   PRIMARY KEY (id),
   KEY idx_item_sale (sale_id),
   KEY idx_item_product (product_id),

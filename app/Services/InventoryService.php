@@ -41,42 +41,50 @@ class InventoryService
         ?int $userId,
         string $plan,
     ): array {
-        $product = $this->products->find($productId);
-
-        if ($product === null) {
-            throw new InvalidArgumentException('PRODUCT_NOT_FOUND');
-        }
-
-        if ($qtyChange < 0 && $this->currentQuantity($branchId, $productId) + $qtyChange < 0) {
-            throw new InvalidArgumentException('INSUFFICIENT_STOCK');
-        }
-
-        $value = round(abs($qtyChange) * (float) $product['cost_price'], 2);
-
         $database = db_connect();
-        $database->transException(true)->transStart();
+        if (! $database->transException(true)->transBegin()) {
+            throw new \RuntimeException('TRANSACTION_FAILED');
+        }
+        try {
+            $database->query('SELECT id FROM products WHERE id = ? FOR UPDATE', [$productId]);
+            $product = $this->products->find($productId);
 
-        $this->recordMovement(
-            $branchId,
-            $productId,
-            $qtyChange,
-            'adjustment',
-            'adjustment',
-            null,
-            $userId,
-        );
+            if ($product === null) {
+                throw new InvalidArgumentException('PRODUCT_NOT_FOUND');
+            }
 
-        if ($plan === 'premium') {
-            $this->accounting->postInventoryAdjustment(
+            if ($qtyChange < 0 && $this->currentQuantity($branchId, $productId) + $qtyChange < 0) {
+                throw new InvalidArgumentException('INSUFFICIENT_STOCK');
+            }
+
+            $value = round(abs($qtyChange) * (float) $product['cost_price'], 2);
+
+            $this->recordMovement(
                 $branchId,
-                $value,
-                $qtyChange > 0,
                 $productId,
+                $qtyChange,
+                'adjustment',
+                'adjustment',
+                null,
                 $userId,
             );
-        }
 
-        $database->transComplete();
+            if ($plan === 'premium') {
+                $this->accounting->postInventoryAdjustment(
+                    $branchId,
+                    $value,
+                    $qtyChange > 0,
+                    $productId,
+                    $userId,
+                );
+            }
+            if (! $database->transStatus() || ! $database->transCommit()) {
+                throw new \RuntimeException('TRANSACTION_FAILED');
+            }
+        } catch (\Throwable $exception) {
+            $database->transRollback();
+            throw $exception;
+        }
 
         AuditService::log(
             'stock.adjust',
@@ -105,7 +113,38 @@ class InventoryService
         ?int $refId = null,
         ?int $userId = null,
         ?int $batchId = null,
+        string $pharmacyPackState = 'any',
     ): void {
+        $pharmacy = new \App\Services\Pharmacy\MedicineBatchService();
+        if ($pharmacy->isMedicine($productId)) {
+            if ($batchId === null && $qtyChange < 0 && $refType === 'sale') {
+                $batches=$pharmacy->batches($branchId,$productId);
+                if ($pharmacyPackState!=='any') $batches=array_values(array_filter($batches,static fn($batch)=>$pharmacyPackState==='opened' ? !empty($batch['opened_pack_id']) : empty($batch['opened_pack_id'])));
+                foreach ($pharmacy::allocate($batches, abs($qtyChange), date('Y-m-d')) as $allocation) {
+                    $this->recordMovement($branchId, $productId, -$allocation['quantity'], $reason, $refType, $refId, $userId, $allocation['batch_id']);
+                }
+                return;
+            }
+            if ($batchId === null && $qtyChange < 0 && $refType === 'purchase_return') {
+                foreach ($pharmacy->supplierReturnAllocations($branchId, $productId, (int)$refId, abs($qtyChange)) as $allocation) {
+                    $this->recordMovement($branchId, $productId, -$allocation['quantity'], $reason, $refType, $refId, $userId, $allocation['batch_id']);
+                }
+                return;
+            }
+            if ($batchId === null && $qtyChange > 0 && $refType === 'sale_return') {
+                // Returned medicines enter a segregated, non-sellable lot for inspection.
+                $db = db_connect();
+                $db->table('product_batches')->insert(['branch_id' => $branchId, 'product_id' => $productId, 'batch_no' => 'RETURN-' . $refId . '-' . bin2hex(random_bytes(3))]);
+                $batchId = (int)$db->insertID();
+                $db->table('pharmacy_batch_states')->insert(['batch_id' => $batchId, 'status' => 'quarantine', 'reason' => 'Customer return; original document return ID ' . $refId]);
+            }
+            if ($batchId === null && $refType !== 'pharmacy_reconcile') throw new InvalidArgumentException('Medicine stock movements require a verified batch. Use Pharmacy stock.');
+            if ($batchId !== null) $pharmacy->validateMovement($branchId, $productId, $batchId, $qtyChange, $refType === 'sale');
+        }
+        if ($qtyChange < 0 && !in_array($refType, ['sale', 'purchase_return', 'sealed_adjustment'], true)) {
+            $product = $this->products->find($productId);
+            if ($product) (new PackageInventoryService())->requireStock($branchId, $product, 'loose', abs($qtyChange));
+        }
         $this->movements->insert([
             'branch_id'  => $branchId,
             'product_id' => $productId,
@@ -127,12 +166,10 @@ class InventoryService
 
     public function currentQuantity(int $branchId, int $productId): float
     {
-        $row = db_connect()->table('stock_levels')
-            ->select('quantity')
-            ->where('branch_id', $branchId)
-            ->where('product_id', $productId)
-            ->get()
-            ->getRowArray();
+        $row = db_connect()->query(
+            'SELECT quantity FROM stock_levels WHERE branch_id=? AND product_id=? FOR UPDATE',
+            [$branchId, $productId],
+        )->getRowArray();
 
         return (float) ($row['quantity'] ?? 0);
     }

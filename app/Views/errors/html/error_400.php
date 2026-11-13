@@ -80,5 +80,6 @@
         <?php endif; ?>
     </p>
 </div>
+<?php require APPPATH . 'Views/partials/copyright.php'; ?>
 </body>
 </html>

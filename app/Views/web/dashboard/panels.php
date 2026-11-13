@@ -1,0 +1,72 @@
+<?php
+$profile=$dashboard['profile'];$own=$profile==='cashier';$access=$dashboard['access'];$sales=$dashboard['sales'];$finance=$dashboard['finance'];$cards=[];
+$add=static function($label,$value,$detail,$icon,$count=false)use(&$cards){$cards[]=compact('label','value','detail','icon','count');};
+if ($own && $sales) {
+    $add('My net sales',$sales['revenue'],'After sales returns','shopping-bag');$add('My net collections',$sales['collected'],'Payments + receipts less refunds','wallet');$add('Orders',$sales['order_count'],'In the selected period','receipt',true);$add('Outstanding on my orders',$sales['outstanding'],'All my orders through closing date','clock');$add('My refunds',$sales['refunds'],$sales['return_count'].' returns recorded by me','undo-2');
+} elseif ($profile==='accountant') {
+    if($access['ledger'])$add('Cash & wallets',$finance['cash'],'Closing ledger balance','wallet');
+    if($access['receivables'])$add('Receivables',$finance['receivables'],$finance['invoice_count'].' outstanding invoices','users');
+    if($access['payables'])$add('Payables',$finance['payables'],$finance['bill_count'].' unpaid bills','clipboard-list');
+    if($access['ledger']){$add('Income',$finance['income'],'In the selected period','chart-no-axes-combined');$add('Expenses',$finance['expenses'],'Including cost of goods','layers');$add('Net profit',$finance['profit'],'Income less expenses','trending-up');}
+} else {
+    if($sales){$add('Net sales',$sales['revenue'],'After returns through closing date','chart-no-axes-combined');$add('Net collected',$sales['collected'],'Payments + receipts less refunds','wallet');}
+    if($access['ledger'])$add('Net profit',$finance['profit'],'Income less expenses','trending-up');
+    if($access['receivables'])$add('Customer dues',$finance['receivables'],$finance['invoice_count'].' outstanding invoices','users');
+    if($access['payables'])$add('Supplier dues',$finance['payables'],$finance['bill_count'].' open bills','truck');
+    if($access['stock'])$add('Low-stock products',$dashboard['low_stock_count'],'At or below reorder level','package',true);
+}
+$grid=count($cards)>=6?'xl:grid-cols-6':(count($cards)===5?'xl:grid-cols-5':'xl:grid-cols-4');
+?>
+<div class="space-y-3" data-dashboard-profile="<?= esc($profile,'attr') ?>">
+    <section class="dashboard-enter w-full flex flex-wrap items-center justify-between gap-3 border border-brand-100 bg-brand-50 rounded-xl px-3 py-3">
+        <div class="flex items-center gap-3"><span class="bg-white text-brand-600 rounded-lg p-2"><i data-lucide="<?= $own?'coffee':($profile==='accountant'?'calculator':'sun') ?>" class="w-5 h-5" aria-hidden="true"></i></span><div><h2 class="font-bold text-sm sm:text-base text-slate-900">Welcome back, <?= esc(explode(' ',trim($dashboard['name']))[0]?:'there') ?>.</h2><p class="text-[11px] text-slate-500 mt-0.5"><?= $own?'Your sales, collections and refunds at a glance.':($profile==='accountant'?'Monitor cash, outstanding balances and the books.':'A complete view of sales, stock and finances.') ?></p></div></div>
+        <div class="flex flex-wrap items-center gap-3 text-[10px] text-slate-500">
+            <?php if($access['ledger']): ?><span class="font-semibold <?= !$finance['has_entries']?'text-slate-500':(abs($finance['difference'])<0.005?'text-emerald-700':'text-amber-700') ?>"><?= !$finance['has_entries']?'No posted accounting entries':(abs($finance['difference'])<0.005?'Trial balance balanced':'Trial balance needs review') ?></span><?php endif; ?>
+            <?php if($access['stock']): ?><span><?= $dashboard['low_stock_count'] ?> low-stock items</span><?php endif; ?>
+            <?php if($access['payables']): ?><span><?= $finance['overdue_bills'] ?> overdue bills</span><?php endif; ?>
+            <span>Updated <?= esc($dashboard['updated_at']) ?> · Nairobi</span>
+        </div>
+    </section>
+    <?php if($cards): ?><div class="dashboard-kpi-grid grid grid-cols-2 md:grid-cols-3 <?= $grid ?> gap-3"><?php foreach($cards as $index=>$card)echo view('web/dashboard/kpi',compact('card','index')); ?></div><?php else: ?><p class="bg-white border border-slate-200 rounded-xl p-5 text-sm text-slate-500">Your role has no dashboard data permissions. Ask an administrator to review your access.</p><?php endif; ?>
+
+    <?php if($sales): ?>
+    <div class="dashboard-chart-grid grid grid-cols-1 lg:grid-cols-[2fr_1fr_1fr] gap-3">
+        <?php $points=$sales['daily'];$series=['sales'=>'Net sales','collections'=>'Receipts before refunds'];$heading='Sales & collections';$subtitle='Orders in period, net of returns through closing date';if($own){$points=[];foreach($sales['hourly'] as $hour=>$amount)$points[]=['label'=>sprintf('%02d:00',$hour),'sales'=>$amount];$series=['sales'=>'Net sales'];$heading='My sales by hour';$subtitle='Selected-period order values, grouped by hour';} echo view('web/dashboard/bar',['points'=>$points,'series'=>$series,'heading'=>$heading,'subtitle'=>$subtitle,'footer'=>'']); ?>
+        <?= view('web/dashboard/donut',['heading'=>$own?'My payment mix':'Payment mix','subtitle'=>'Receipts before refunds · USD','segments'=>$sales['payment_mix'],'currency'=>true]) ?>
+        <?= view('web/dashboard/donut',['heading'=>$own?'My order status':'Sales status','subtitle'=>'Settlement at the closing date','segments'=>$sales['status_mix'],'currency'=>false]) ?>
+    </div>
+    <?php endif; ?>
+
+    <?php if($profile==='accountant'): ?>
+        <div class="dashboard-chart-grid grid grid-cols-1 lg:grid-cols-[2fr_1fr_1fr] gap-3">
+            <?php if($access['ledger']): ?>
+                <?= view('web/dashboard/bar',['heading'=>'Cash movement','subtitle'=>'Transfers between money accounts excluded · USD','points'=>$finance['flow'],'series'=>['in'=>'Cash in','out'=>'Cash out'],'footer'=>'Opening $'.number_format($finance['opening'],2).' · Net movement $'.number_format($finance['movement'],2).' · Closing $'.number_format($finance['cash'],2)]) ?>
+                <?= view('web/dashboard/donut',['heading'=>'Expense breakdown','subtitle'=>'Positive expense account balances · USD','segments'=>$finance['expense_mix'],'currency'=>true]) ?>
+            <?php endif; ?>
+            <?php if($access['receivables']): ?><?= view('web/dashboard/donut',['heading'=>'Receivables ageing','subtitle'=>'Days from due date, or invoice date if unset','segments'=>$finance['ageing'],'currency'=>true]) ?><?php endif; ?>
+        </div>
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+            <?php if($access['receivables'])echo view('web/dashboard/documents',['heading'=>'Customer invoices due','closingDate'=>$dashboard['to'],'type'=>'invoice','rows'=>$finance['invoices']]); ?>
+            <?php if($access['payables'])echo view('web/dashboard/documents',['heading'=>'Supplier bills due','closingDate'=>$dashboard['to'],'type'=>'bill','rows'=>$finance['bills']]); ?>
+        </div>
+    <?php endif; ?>
+
+    <?php if($profile==='admin'): ?><div class="grid grid-cols-1 xl:grid-cols-5 gap-3">
+        <?php if($sales): ?><div class="xl:col-span-3 min-w-0"><?= view('web/dashboard/orders',compact('sales','own')) ?></div><?php endif; ?>
+        <?php if($access['ledger']): ?><article class="dashboard-enter xl:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden min-w-0"><h2 class="p-3 font-bold text-sm">Financial snapshot</h2><table class="w-full text-left text-xs"><thead class="bg-brand-50 text-[10px] text-slate-500"><tr><th class="px-3 py-2">Account / item</th><th class="px-3 py-2 text-right">Balance (USD)</th></tr></thead><tbody class="divide-y divide-slate-100"><?php foreach(['Cash & wallets'=>'cash','Receivables ledger'=>'ar_ledger','Inventory ledger'=>'inventory','Payables ledger'=>'ap_ledger','Net profit in period'=>'profit'] as $label=>$field): ?><tr><td class="px-3 py-2"><?= $label ?></td><td class="px-3 py-2 text-right font-semibold tabular-nums">$<?= number_format($finance[$field],2) ?></td></tr><?php endforeach; ?></tbody></table><p class="m-3 p-2 rounded-lg bg-brand-50 text-[10px] text-brand-700">Assets $<?= number_format($finance['assets'],2) ?> · Liabilities + equity $<?= number_format($finance['liabilities']+$finance['equity'],2) ?></p></article><?php endif; ?>
+    </div><div class="grid grid-cols-1 xl:grid-cols-3 gap-3">
+        <?php if($access['stock']): ?><article class="dashboard-enter bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden min-w-0"><h2 class="text-sm font-bold p-3">Stock watch</h2><div class="overflow-x-auto"><table class="w-full text-left text-xs"><thead class="bg-brand-50 text-[10px] text-slate-500"><tr><th class="px-3 py-2">Product</th><th class="px-3 py-2 text-right">On hand</th><th class="px-3 py-2 text-right">Reorder</th></tr></thead><tbody class="divide-y divide-slate-100"><?php foreach($dashboard['stock'] as $product): ?><tr><td class="px-3 py-2"><?= esc($product['name']) ?></td><td class="px-3 py-2 text-right font-semibold <?= $product['quantity']<=0?'text-rose-600':'text-amber-700' ?>"><?= number_format($product['quantity'],3) ?> <?= esc($product['unit']) ?></td><td class="px-3 py-2 text-right"><?= number_format($product['reorder_level'],3) ?></td></tr><?php endforeach; ?><?php if(!$dashboard['stock']): ?><tr><td colspan="3" class="p-5 text-center text-slate-400">All products are above reorder level.</td></tr><?php endif; ?></tbody></table></div></article><?php endif; ?>
+        <?php if($access['payables'])echo view('web/dashboard/documents',['heading'=>'Supplier bills due','closingDate'=>$dashboard['to'],'type'=>'bill','rows'=>$finance['bills']]); ?>
+        <article class="dashboard-enter bg-white rounded-xl border border-slate-200 p-3 shadow-sm min-w-0"><h2 class="text-sm font-bold mb-2">Recent activity</h2><ul class="divide-y divide-slate-100"><?php foreach($dashboard['activity'] as $activity): ?><li class="py-2 text-xs"><div class="flex flex-wrap justify-between gap-1"><strong><?= esc($activity['label']) ?></strong><time class="text-[10px] text-slate-400"><?= esc(substr($activity['date'],0,16)) ?></time></div><p class="text-[10px] text-slate-500 mt-1"><?= esc($activity['detail']) ?></p></li><?php endforeach; ?><?php if(!$dashboard['activity']): ?><li class="py-5 text-slate-400 text-xs">No activity in the selected period.</li><?php endif; ?></ul></article>
+    </div><?php endif; ?>
+
+    <?php if($own && $sales): ?>
+        <?= view('web/dashboard/orders',compact('sales','own')) ?>
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+            <article class="dashboard-enter bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden min-w-0"><h2 class="text-sm font-bold p-3">Collections recorded by me</h2><div class="overflow-x-auto"><table class="w-full text-left text-xs"><thead class="bg-brand-50 text-[10px] text-slate-500"><tr><th class="px-3 py-2">Date / time</th><th class="px-3 py-2">Receipt</th><th class="px-3 py-2">Customer</th><th class="px-3 py-2 text-right">Collected</th><th class="px-3 py-2">Method</th></tr></thead><tbody class="divide-y divide-slate-100"><?php foreach($sales['receipts'] as $receipt): ?><tr><td class="px-3 py-2 whitespace-nowrap"><?= esc(substr($receipt['date'],0,16)) ?></td><td class="px-3 py-2 font-mono text-[10px]"><?= esc($receipt['reference']) ?></td><td class="px-3 py-2"><?= esc($receipt['customer']) ?></td><td class="px-3 py-2 text-right tabular-nums">$<?= number_format($receipt['amount'],2) ?></td><td class="px-3 py-2 text-[10px]"><?= esc(ucwords(str_replace('_',' ',$receipt['method']))) ?></td></tr><?php endforeach; ?><?php if(!$sales['receipts']): ?><tr><td colspan="5" class="p-5 text-center text-slate-400">No customer receipts recorded by you in this period.</td></tr><?php endif; ?></tbody></table></div></article>
+            <article class="dashboard-enter bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden min-w-0"><h2 class="text-sm font-bold px-3 pt-3">Top items I sold</h2><p class="text-[10px] text-slate-500 px-3 pb-2">Original item sales before returns and order-level adjustments</p><table class="w-full text-left text-xs"><thead class="bg-brand-50 text-[10px] text-slate-500"><tr><th class="px-3 py-2">Product</th><th class="px-3 py-2 text-right">Qty</th><th class="px-3 py-2 text-right">Item sales</th></tr></thead><tbody class="divide-y divide-slate-100"><?php foreach($sales['top_items'] as $item): ?><tr><td class="px-3 py-2"><?= esc($item['description']) ?></td><td class="px-3 py-2 text-right"><?= number_format($item['quantity'],3) ?></td><td class="px-3 py-2 text-right tabular-nums">$<?= number_format($item['total'],2) ?></td></tr><?php endforeach; ?><?php if(!$sales['top_items']): ?><tr><td colspan="3" class="p-5 text-center text-slate-400">No items sold in this period.</td></tr><?php endif; ?></tbody></table><p class="m-3 p-2 rounded-lg bg-brand-50 text-[10px] text-brand-700">Returns recorded by me: <?= $sales['return_count'] ?> · Refunds: $<?= number_format($sales['refunds'],2) ?></p></article>
+        </div>
+    <?php endif; ?>
+
+    <?php if($profile==='accountant' && $access['ledger']): ?><div class="grid grid-cols-1 xl:grid-cols-5 gap-3"><article class="dashboard-enter xl:col-span-3 min-w-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden"><h2 class="text-sm font-bold p-3">Recent accounting entries</h2><div class="overflow-x-auto"><table class="w-full text-left text-xs"><thead class="bg-brand-50 text-[10px] text-slate-500"><tr><th class="px-3 py-2">Date</th><th class="px-3 py-2">Entry</th><th class="px-3 py-2">Description</th><th class="px-3 py-2 text-right">Debit</th><th class="px-3 py-2 text-right">Credit</th></tr></thead><tbody class="divide-y divide-slate-100"><?php foreach($finance['entries'] as $entry): ?><tr><td class="px-3 py-2 whitespace-nowrap"><?= esc($entry['date']) ?></td><td class="px-3 py-2 font-mono text-[10px]"><?= esc($entry['reference']) ?></td><td class="px-3 py-2"><?= esc($entry['description']) ?></td><td class="px-3 py-2 text-right tabular-nums">$<?= number_format($entry['debit'],2) ?></td><td class="px-3 py-2 text-right tabular-nums">$<?= number_format($entry['credit'],2) ?></td></tr><?php endforeach; ?><?php if(!$finance['entries']): ?><tr><td colspan="5" class="p-5 text-center text-slate-400">No accounting entries in this period.</td></tr><?php endif; ?></tbody></table></div></article><div class="xl:col-span-2 min-w-0"><?= view('web/dashboard/reconciliation',compact('finance','access')) ?></div></div><?php endif; ?>
+</div>

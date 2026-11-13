@@ -2,9 +2,10 @@
 
 namespace App\Models;
 
-use CodeIgniter\Model;
+use App\Services\ProductIdentifierException;
+use App\Services\ProductIdentifierService;
 
-class ProductModel extends Model
+class ProductModel extends FinanciallyProtectedModel
 {
     protected $table          = 'products';
     protected $primaryKey     = 'id';
@@ -13,10 +14,44 @@ class ProductModel extends Model
     protected $useTimestamps  = true;
     protected $deletedField   = 'deleted_at';
     protected $allowedFields  = [
-        'category_id', 'supplier_id', 'sku', 'barcode', 'name', 'brand',
-        'unit', 'cost_price', 'sell_price', 'tax_rate', 'reorder_level',
+        'category_id', 'supplier_id', 'sku', 'barcode', 'sealed_barcode', 'name', 'brand',
+        'selling_group_id', 'default_sale_mode', 'package_unit', 'package_size', 'package_price', 'unit', 'cost_price', 'sell_price', 'tax_rate', 'reorder_level',
         'attributes', 'image_path', 'track_batches', 'track_serials', 'is_active',
     ];
+
+    public function insert($row = null, bool $returnID = true)
+    {
+        $fields = $this->transformDataToArray($row, 'insert');
+        return ProductIdentifierService::withLock($this->db, function () use ($fields, $returnID) {
+            $fields = $this->normalizeBarcodes($fields);
+            ProductIdentifierService::assertAvailable($this->db, $fields);
+            return parent::insert($fields, $returnID);
+        });
+    }
+
+    public function update($id = null, $row = null): bool
+    {
+        $fields = $this->transformDataToArray($row, 'update');
+        if (!array_intersect(array_keys($fields), ProductIdentifierService::FIELDS)) return parent::update($id, $row);
+
+        $ids = (array)$id;
+        if (count($ids) !== 1 || !ctype_digit((string)reset($ids))) {
+            throw new ProductIdentifierException('Update identifiers on one product at a time.');
+        }
+        return ProductIdentifierService::withLock($this->db, function () use ($id, $ids, $fields) {
+            $fields = $this->normalizeBarcodes($fields);
+            ProductIdentifierService::assertAvailable($this->db, $fields, (int)reset($ids));
+            return parent::update($id, $fields);
+        });
+    }
+
+    private function normalizeBarcodes(array $fields): array
+    {
+        foreach (['barcode', 'sealed_barcode'] as $field) {
+            if (array_key_exists($field, $fields)) $fields[$field] = ProductIdentifierService::normalizeBarcode($fields[$field]);
+        }
+        return $fields;
+    }
 
     /**
      * Product list with the current stock quantity of one branch,
@@ -35,6 +70,7 @@ class ProductModel extends Model
                 ->like('products.name', $term)
                 ->orLike('products.sku', $term)
                 ->orLike('products.barcode', $term)
+                ->orLike('products.sealed_barcode', $term)
                 ->orLike('products.brand', $term)
                 ->groupEnd();
         }
@@ -43,11 +79,11 @@ class ProductModel extends Model
             $builder->where('products.category_id', (int) $filters['category_id']);
         }
 
+        $reorderStock = \App\Services\PackageInventoryService::reorderExpression('products','stock_levels',$branchId);
         if (($filters['stock'] ?? '') === 'out') {
             $builder->where('COALESCE(stock_levels.quantity, 0) <=', 0);
         } elseif (($filters['stock'] ?? '') === 'low') {
-            $builder->where('COALESCE(stock_levels.quantity, 0) >', 0)
-                ->where('COALESCE(stock_levels.quantity, 0) <= products.reorder_level');
+            $builder->where("($reorderStock) <= products.reorder_level",null,false);
         }
 
         $total = $builder->countAllResults(false);
@@ -73,8 +109,8 @@ class ProductModel extends Model
     {
         return $this->db->table($this->table)
             ->select('products.id, products.category_id, products.supplier_id,
-                      products.sku, products.barcode, products.name, products.brand,
-                      products.unit, products.cost_price, products.sell_price,
+                      products.sku, products.barcode, products.sealed_barcode, products.name, products.brand,
+                      products.selling_group_id, products.default_sale_mode, products.package_unit, products.package_size, products.package_price, products.unit, products.cost_price, products.sell_price,
                       products.tax_rate, products.reorder_level, products.attributes,
                       products.image_path,
                       products.track_batches, products.track_serials, products.is_active,
@@ -102,7 +138,7 @@ class ProductModel extends Model
         $row['cost_price']    = (float) $row['cost_price'];
         $row['sell_price']    = (float) $row['sell_price'];
         $row['tax_rate']      = (float) $row['tax_rate'];
-        $row['reorder_level'] = (int) $row['reorder_level'];
+        $row['reorder_level'] = (float) $row['reorder_level'];
         $row['track_batches'] = (bool) $row['track_batches'];
         $row['track_serials'] = (bool) $row['track_serials'];
         $row['is_active']     = (bool) $row['is_active'];

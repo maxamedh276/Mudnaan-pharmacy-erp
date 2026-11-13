@@ -1,0 +1,7 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync('app/Views/web/pos/index.php','utf8');const a=source.indexOf('        const pendingPrintSales'),b=source.indexOf('        function downloadEscposBinary',a);
+const calls=[],messages=[],button={disabled:false,innerHTML:'Print'};let active=0;
+const context={POS:{},document:{getElementById:()=>button},showToast:(...args)=>messages.push(args),async apiCall(url){assert.equal(++active,1,'Printer jobs must be serialized.');calls.push(url);await new Promise(resolve=>setTimeout(resolve,5));active--;return{data:{success:true,message:'Queued'}};}};
+context.window={erpPrinting:{sale:async id=>(await context.apiCall('/sales/'+id+'/print')).data}};
+vm.runInNewContext(source.slice(a,b),context);
+(async()=>{await Promise.all([context.printDirectThermal(1),context.printDirectThermal(1),context.printDirectThermal(2)]);assert.deepEqual(calls,['/sales/1/print','/sales/2/print']);assert(!button.disabled);context.apiCall=async()=>{throw Error('Printer unavailable');};await context.printDirectThermal(3);context.apiCall=async url=>{calls.push(url);return{data:{success:true,message:'Queued'}};};await context.printDirectThermal(4);assert.equal(calls.at(-1),'/sales/4/print');assert(messages.some(([message])=>message==='Printer unavailable'));console.log('PASS: POS print queue serializes jobs, suppresses duplicate pending clicks, recovers after failures, and never resubmits a sale.');})().catch(error=>{console.error(error);process.exitCode=1;});

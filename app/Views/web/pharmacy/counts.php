@@ -1,0 +1,16 @@
+<?= $this->extend('layouts/main') ?>
+<?= $this->section('content') ?>
+<?php
+if (!session()->get('pharmacy_csrf')) session()->set('pharmacy_csrf',bin2hex(random_bytes(32)));
+$manage=\App\Libraries\AuthContext::can('pharmacy.stock.manage');$approve=\App\Libraries\AuthContext::can('pharmacy.stock.approve');
+?>
+<section id="pharmacyCounts" data-base="<?= site_url('pharmacy') ?>" data-token="<?= esc(session()->get('pharmacy_csrf'),'attr') ?>" data-manage="<?= $manage?'1':'0' ?>" data-approve="<?= $approve?'1':'0' ?>">
+<header class="mb-5"><p class="text-xs uppercase font-bold text-emerald-600 tracking-widest">Physical verification</p><h1 class="text-2xl font-bold mt-2">Physical Stock Counts</h1><p class="text-sm text-slate-500 mt-2">Start a count → enter physical base quantities by batch → submit → approve the variance. Draft and submitted counts do not change stock or accounting.</p></header>
+<p class="bg-amber-50 border rounded-xl p-4 text-sm mb-5">Keep the selected stock still while counting. Any batch movement or new batch after the snapshot prevents approval; cancel and recount. Count opened and unopened lots separately.</p>
+<?php if ($manage): ?><form id="stockCountStart" class="bg-white border rounded-2xl p-5 flex flex-wrap gap-4 items-end mb-5"><label class="text-sm flex-1">Count scope<select name="product_id" class="block w-full border rounded-lg p-2 mt-1"><option value="">All medicines with recorded batches</option><?php foreach ($medicines as $m): ?><option value="<?= (int)$m['product_id'] ?>"><?= esc($m['name'].' · '.$m['strength']) ?></option><?php endforeach; ?></select></label><button class="bg-emerald-600 text-white rounded-lg px-5 py-2">Start stock count</button><p role="status" data-feedback class="text-sm w-full"></p></form><?php endif; ?>
+<div class="bg-white border rounded-2xl p-5"><h2 class="font-semibold mb-3">Latest 50 count sessions</h2><div id="stockCountList" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3"></div></div>
+<script type="application/json" id="stockCountsInitial"><?= json_encode($counts,JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_QUOT|JSON_HEX_APOS) ?></script>
+<dialog id="stockCountDialog" aria-labelledby="stockCountTitle" class="rounded-2xl p-5 w-11/12 max-w-5xl max-h-[90vh] overflow-y-auto"><header class="flex justify-between items-center gap-3"><h2 id="stockCountTitle" class="font-bold text-lg">Stock count</h2><button type="button" id="stockCountClose" aria-label="Close" class="p-2">×</button></header><p id="stockCountMeta" class="text-sm text-slate-500 my-3"></p><form id="stockCountEditor"><div class="overflow-x-auto"><table class="text-sm w-full text-left"><thead class="bg-slate-50"><tr><th class="p-3">Medicine / batch</th><th class="p-3">Expected base qty</th><th class="p-3">Counted base qty</th><th class="p-3">Variance reason</th></tr></thead><tbody id="stockCountRows"></tbody></table></div><p id="stockCountFeedback" role="status" class="text-sm my-3"></p><div id="stockCountActions" class="flex flex-wrap gap-3 justify-end mt-4"></div></form></dialog>
+</section>
+<?= $this->endSection() ?>
+<?= $this->section('scripts') ?><script src="<?= base_url('assets/js/pharmacy-counts.js').'?v='.filemtime(FCPATH.'assets/js/pharmacy-counts.js') ?>"></script><?= $this->endSection() ?>

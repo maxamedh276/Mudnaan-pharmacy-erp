@@ -4,7 +4,7 @@ Options -Indexes
 # ----------------------------------------------------------------------
 # Protect sensitive files/folders
 # ----------------------------------------------------------------------
-# The front controller now lives in the project root, so the application
+# The front controller lives in the project root, so the application
 # and framework folders sit under the web root. Block direct web access
 # to anything that isn't meant to be served.
 
@@ -13,34 +13,28 @@ Options -Indexes
 	Require all denied
 </FilesMatch>
 
-# Block the framework/application folders entirely
-RedirectMatch 403 ^/erp-backend/(app|system|writable|tests|vendor)/.*$
-
 # ----------------------------------------------------------------------
 # Rewrite engine
 # ----------------------------------------------------------------------
 
-# Turning on the rewrite engine is necessary for the following rules and features.
-# FollowSymLinks must be enabled for this to work.
 <IfModule mod_rewrite.c>
 	Options +FollowSymlinks
 	RewriteEngine On
 
-	# Served from the "erp-backend" subfolder of the Laragon web root,
-	# i.e. http://localhost/erp-backend/
-	RewriteBase /erp-backend/
+	# Block direct access to framework/application/data directories
+	RewriteRule ^(app|system|writable|tests|tools|vendor|\.tools|\.branches|\.git)(/|$) - [F,L,NC]
+	RewriteRule ^(\.env|composer\.(json|lock)|phpunit\.dist\.xml|spark) - [F,L,NC]
 
 	# Redirect Trailing Slashes...
 	RewriteCond %{REQUEST_FILENAME} !-d
 	RewriteCond %{REQUEST_URI} (.+)/$
 	RewriteRule ^ %1 [L,R=301]
 
-	# Checks to see if the user is attempting to access a valid file,
-	# such as an image or css document, if this isn't true it sends the
-	# request to the front controller, index.php
+	# Checks to see if the user is attempting to access a valid file or folder,
+	# such as an image, css, or js document. If not, route to index.php
 	RewriteCond %{REQUEST_FILENAME} !-f
 	RewriteCond %{REQUEST_FILENAME} !-d
-	RewriteRule ^([\s\S]*)$ index.php/$1 [L,NC,QSA]
+	RewriteRule ^(.*)$ index.php/$1 [L,QSA]
 
 	# Ensure Authorization header is passed along (needed for JWT Bearer tokens)
 	RewriteCond %{HTTP:Authorization} .

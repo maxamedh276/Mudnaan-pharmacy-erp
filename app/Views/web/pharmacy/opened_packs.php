@@ -1,0 +1,21 @@
+<?= $this->extend('layouts/main') ?>
+<?= $this->section('content') ?>
+<?php if (!session()->get('pharmacy_csrf')) session()->set('pharmacy_csrf',bin2hex(random_bytes(32))); ?>
+<section id="pharmacyOpenedPacks" data-url="<?= site_url('pharmacy/open-pack/save') ?>" data-token="<?= esc(session()->get('pharmacy_csrf'),'attr') ?>">
+<header class="mb-5"><p class="text-xs uppercase font-bold text-emerald-600 tracking-widest">Packaging & traceability</p><h1 class="text-2xl font-bold mt-2">Opened Packs & Use-by</h1><p class="text-sm text-slate-500 mt-2">Transfer a whole pack into an opened lot. Total physical stock and inventory value stay unchanged. The recorded use-by time blocks further dispensing after it passes.</p></header>
+<div class="bg-emerald-50 border rounded-xl p-4 text-sm mb-5">Configure each medicine unit's <strong>Stock source</strong> in Medicines & Units: opened stock for loose quantities, sealed stock for unopened packaging, or any released stock for existing workflows. Opening instructions and use-by times must be supplied by the authorised pharmacist.</div>
+<?php if (\App\Libraries\AuthContext::can('pharmacy.stock.manage')): ?>
+<form id="openPackForm" class="bg-white border rounded-2xl p-5 grid sm:grid-cols-3 gap-4 mb-5">
+<label class="text-sm">Medicine<select name="product_id" required class="block border rounded-lg p-2 mt-1 w-full"><option value="">Select medicine</option><?php foreach ($medicines as $m): ?><option value="<?= (int)$m['product_id'] ?>"><?= esc($m['name'].' · '.$m['strength']) ?></option><?php endforeach; ?></select></label>
+<label class="text-sm">Unopened source batch<select name="source_batch_id" required class="block border rounded-lg p-2 mt-1 w-full"></select></label>
+<label class="text-sm">Pack unit<select name="medicine_unit_id" required class="block border rounded-lg p-2 mt-1 w-full"></select></label>
+<label class="text-sm">Whole packs to open<input name="quantity" type="number" required min="1" step="1" value="1" class="block border rounded-lg p-2 mt-1 w-full"></label>
+<label class="text-sm">Use by (local date & time)<input name="use_by" type="datetime-local" required class="block border rounded-lg p-2 mt-1 w-full"></label>
+<label class="text-sm">Reason / approved instructions<input name="reason" required maxlength="500" class="block border rounded-lg p-2 mt-1 w-full"></label>
+<p id="openPackSummary" role="status" class="text-sm sm:col-span-3 text-slate-500"></p><p data-feedback role="status" class="text-sm sm:col-span-3"></p><div class="sm:col-span-3 flex justify-end"><button class="bg-emerald-600 text-white rounded-lg px-5 py-2">Open pack & record transfer</button></div>
+</form><?php endif; ?>
+<div class="bg-white border rounded-2xl p-5"><h2 class="font-semibold mb-3">Opened lots and remaining base units</h2><div class="overflow-x-auto"><table class="text-left text-sm w-full"><thead class="bg-slate-50"><tr><th class="p-3">Medicine / lot</th><th class="p-3">Source batch ID</th><th class="p-3">Opened</th><th class="p-3">Use by</th><th class="p-3">Remaining</th><th class="p-3">Availability</th></tr></thead><tbody><?php $found=false; foreach ($batches as $b): if (empty($b['opened_pack_id'])) continue; $found=true; ?><tr class="border-t"><td class="p-3"><?= esc($b['name'].' / '.$b['batch_no']) ?></td><td class="p-3">#<?= (int)$b['source_batch_id'] ?></td><td class="p-3"><?= esc($b['opened_at']) ?></td><td class="p-3"><?= esc($b['opened_use_by']) ?></td><td class="p-3"><?= esc($b['quantity'].' '.$b['unit']) ?></td><td class="p-3"><?= (float)$b['quantity']<=0?'Exhausted':(\App\Services\Pharmacy\MedicineBatchService::sellable($b,date('Y-m-d'))?'Released':'Blocked') ?></td></tr><?php endforeach; if (!$found): ?><tr><td colspan="6" class="p-5 text-slate-500">No packs opened yet. Opening never creates a purchase or an extra stock balance.</td></tr><?php endif; ?></tbody></table></div></div>
+<script type="application/json" id="openedPackData"><?= json_encode(compact('medicines','batches','unitDefinitions'),JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_QUOT|JSON_HEX_APOS) ?></script>
+</section>
+<?= $this->endSection() ?>
+<?= $this->section('scripts') ?><script src="<?= base_url('assets/js/pharmacy-opened-packs.js').'?v='.filemtime(FCPATH.'assets/js/pharmacy-opened-packs.js') ?>"></script><?= $this->endSection() ?>

@@ -14,7 +14,7 @@ use Throwable;
 /**
  * Gatekeeper for every protected route: "who are you, and which database?"
  *
- * 1. Reads and verifies the Bearer JWT.
+ * 1. Reads and verifies the Bearer JWT (or session/cookie for web requests).
  * 2. Resolves the tenant from the token and connects to that tenant's DB.
  * 3. Loads the user and their permissions into AuthContext.
  */
@@ -23,13 +23,21 @@ class AuthFilter implements FilterInterface
     public function before(RequestInterface $request, $arguments = null)
     {
         $authorizationHeader = $request->getHeaderLine('Authorization');
+        $token = null;
 
-        if (! preg_match('/Bearer\s+(\S+)/', $authorizationHeader, $matches)) {
+        if (preg_match('/Bearer\s+(\S+)/', $authorizationHeader, $matches)) {
+            $token = $matches[1];
+        } else {
+            // Web browser fallback: session or cookie
+            $token = session()->get('token') ?? $request->getCookie('erp_token');
+        }
+
+        if (empty($token)) {
             return $this->deny('UNAUTHORIZED', 'Missing authentication token.');
         }
 
         try {
-            $claims = (new JwtService())->verify($matches[1]);
+            $claims = (new JwtService())->verify($token);
         } catch (Throwable) {
             return $this->deny('TOKEN_INVALID', 'Your session has expired. Please log in again.');
         }
@@ -53,6 +61,16 @@ class AuthFilter implements FilterInterface
         AuthContext::$user        = $user;
         AuthContext::$tenant      = $tenant;
         AuthContext::$permissions = $userModel->permissionCodes((int) $user->role_id);
+
+        // The legacy settings endpoint backs Operational Settings, not the appearance/printer forms.
+        // Keep its controller and mobile route contract intact while enforcing the same web boundary.
+        if (preg_match('#(?:^|/)api/v1/settings/?$#i', rawurldecode($request->getUri()->getPath()))
+            && !AuthContext::can('settings.operational')) {
+            return service('response')->setStatusCode(403)->setJSON([
+                'success' => false,
+                'error' => ['code' => 'FORBIDDEN', 'message' => 'Operational Settings is available to Superadmins only.'],
+            ]);
+        }
 
         return null;
     }

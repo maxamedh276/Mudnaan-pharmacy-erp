@@ -16,6 +16,7 @@ INSERT INTO permissions (code, description) VALUES
   ('stock.adjust',      'Make manual stock adjustments'),
   ('purchases.view',    'View purchases'),
   ('purchases.create',  'Record purchases / goods received'),
+  ('purchases.return',  'Process purchase returns and supplier refunds'),
   ('customers.view',    'View customers'),
   ('customers.manage',  'Add and edit customers'),
   ('suppliers.view',    'View suppliers'),
